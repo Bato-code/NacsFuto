@@ -428,3 +428,35 @@ body {
   50% { box-shadow: 0 4px 28px var(--btn-shadow), 0 0 12px var(--btn-shadow); }
   100%{ box-shadow: 0 4px 20px var(--btn-shadow); }
 }
+
+/* ─── Input with icon wrapper ─────────────────────────────────────────────── */
+.input-icon-wrap { position: relative; }
+.input-icon-wrap .input-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--text-muted);
+  width: 16px;
+  height: 16px;
+}
+.input-icon-wrap .cyber-input {
+  padding-left: 40px !important;
+}
+.input-icon-wrap .cyber-input.has-right-icon {
+  padding-right: 40px !important;
+}
+.input-icon-wrap .input-icon-right {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+}

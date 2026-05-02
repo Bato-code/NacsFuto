@@ -64,10 +64,6 @@ export default function SignUpPage() {
     )
   }
 
-  const inputIcon = (Icon: any) => (
-    <Icon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-muted)' }} />
-  )
-
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-md">
@@ -116,9 +112,9 @@ export default function SignUpPage() {
               <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                 Matriculation Number <span style={{ color: '#ef4444' }}>*</span>
               </label>
-              <div className="relative mb-4">
-                {inputIcon(User)}
-                <input className="cyber-input pl-10" placeholder="e.g., 20251234567"
+              <div className="input-icon-wrap mb-4">
+                <User className="input-icon" />
+                <input className="cyber-input" placeholder="e.g., 20251234567"
                   value={matric} onChange={e => setMatric(e.target.value)} onKeyDown={e => e.key === 'Enter' && verifyMatric()} />
               </div>
               <button onClick={verifyMatric} disabled={loading} className="cyber-btn w-full">
@@ -150,9 +146,9 @@ export default function SignUpPage() {
                     <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                       {label} <span style={{ color: '#ef4444' }}>*</span>
                     </label>
-                    <div className="relative">
-                      <Icon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-muted)' }} />
-                      <input className="cyber-input pl-10" type={type} placeholder={ph} value={val} onChange={e => set(e.target.value)} />
+                    <div className="input-icon-wrap">
+                      <Icon className="input-icon" />
+                      <input className="cyber-input" type={type} placeholder={ph} value={val} onChange={e => set(e.target.value)} />
                     </div>
                   </div>
                 ))}

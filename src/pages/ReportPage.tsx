@@ -97,24 +97,12 @@ export default function ReportPage() {
               <span>{error}</span>
             </div>
           )}
-          {!user && (
-            <div className="rounded-lg p-3 mb-4 flex items-center gap-2"
-              style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-border)' }}>
-              <AlertCircle className="w-4 h-4 shrink-0" style={{ color: 'var(--accent)' }} />
-              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                <Link to="/login" style={{ color: 'var(--accent)' }} className="font-semibold hover:underline">Sign in</Link>
-                {' '}to submit a report. You can preview the form below.
-              </p>
-            </div>
-          )}
           <div className="space-y-4">
             <div>
               <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                 Category <span style={{ color: '#ef4444' }}>*</span>
               </label>
-              <select className="cyber-select" value={category}
-                onChange={e => user ? setCategory(e.target.value) : undefined}
-                disabled={!user}>
+              <select className="cyber-select" value={category} onChange={e => setCategory(e.target.value)}>
                 <option value="">Select a category</option>
                 {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
@@ -124,8 +112,7 @@ export default function ReportPage() {
                 Subject <span style={{ color: '#ef4444' }}>*</span>
               </label>
               <input className="cyber-input" placeholder="Brief description of the issue or topic"
-                value={subject} onChange={e => user ? setSubject(e.target.value) : undefined}
-                readOnly={!user} />
+                value={subject} onChange={e => setSubject(e.target.value)} />
             </div>
             <div>
               <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
@@ -133,22 +120,20 @@ export default function ReportPage() {
               </label>
               <textarea className="cyber-input resize-none h-32"
                 placeholder="Provide detailed information about your report, complaint, or suggestion..."
-                value={message} onChange={e => user ? setMessage(e.target.value) : undefined}
-                readOnly={!user} />
+                value={message} onChange={e => setMessage(e.target.value)} />
             </div>
             <div>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={includeContact}
-                  onChange={e => user ? setIncludeContact(e.target.checked) : undefined}
-                  className="w-4 h-4 accent-sky-400" disabled={!user} />
+                  onChange={e => setIncludeContact(e.target.checked)}
+                  className="w-4 h-4 accent-sky-400" />
                 <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                   Include contact information for follow-up (optional)
                 </span>
               </label>
               {includeContact && (
                 <input className="cyber-input mt-2" placeholder="Your name or email for follow-up"
-                  value={contactInfo} onChange={e => setContactInfo(e.target.value)}
-                  readOnly={!user} />
+                  value={contactInfo} onChange={e => setContactInfo(e.target.value)} />
               )}
             </div>
             {user ? (
@@ -157,7 +142,8 @@ export default function ReportPage() {
                 {loading ? 'Submitting...' : 'Submit Report'}
               </button>
             ) : (
-              <Link to="/login" className="cyber-btn w-full justify-center">
+              <Link to="/login" className="cyber-btn w-full justify-center"
+                style={{ opacity: 1, cursor: 'pointer' }}>
                 <Shield className="w-4 h-4" />
                 Sign In to Submit Report
               </Link>

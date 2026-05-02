@@ -20,7 +20,6 @@ export default function LoginPage() {
     const { error } = await signIn(email, password)
     setLoading(false)
     if (error) { setError(error.message); return }
-    // Redirect back — works for /election too
     navigate(redirectTo)
   }
 
@@ -43,7 +42,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Election redirect notice */}
         {comingFromElection && (
           <div className="rounded-lg p-3 mb-4" style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-border)' }}>
             <p className="text-xs font-semibold mb-0.5" style={{ color: 'var(--accent)' }}>🗳️ Election Login</p>
@@ -66,9 +64,9 @@ export default function LoginPage() {
               <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                 Email Address <span style={{ color: '#ef4444' }}>*</span>
               </label>
-              <div className="relative">
-                <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-muted)' }} />
-                <input className="cyber-input pl-10" type="email" placeholder="your.email@example.com"
+              <div className="input-icon-wrap">
+                <Mail className="input-icon" />
+                <input className="cyber-input" type="email" placeholder="your.email@example.com"
                   value={email} onChange={e => setEmail(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleLogin()} />
               </div>
@@ -77,15 +75,13 @@ export default function LoginPage() {
               <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                 Password <span style={{ color: '#ef4444' }}>*</span>
               </label>
-              <div className="relative">
-                <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-muted)' }} />
-                <input className="cyber-input pl-10 pr-10" type={showPass ? 'text' : 'password'}
+              <div className="input-icon-wrap">
+                <Lock className="input-icon" />
+                <input className="cyber-input has-right-icon" type={showPass ? 'text' : 'password'}
                   placeholder="Enter your password"
                   value={password} onChange={e => setPassword(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleLogin()} />
-                <button onClick={() => setShowPass(!showPass)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2"
-                  style={{ color: 'var(--text-muted)' }}>
+                <button onClick={() => setShowPass(!showPass)} className="input-icon-right">
                   {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
