@@ -1,0 +1,157 @@
+/* ─── Election Portal Styles ──────────────────────────────────────────────── */
+/* These styles are scoped to the election portal only and don't affect       */
+/* the main NACS FUTO site design at all.                                     */
+
+/* Background - light blue gradient like the screenshot */
+.election-portal-bg {
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 50%, #c7d2fe 100%);
+  background-attachment: fixed;
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+/* Main card */
+.election-card {
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+/* Stats row */
+.election-stats-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.election-stat {
+  padding: 16px 12px;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  font-family: 'Space Grotesk', sans-serif;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.stat-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+
+/* Info box */
+.election-info-box {
+  margin: 16px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+/* Status badge */
+.election-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.election-status-badge.open {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #16a34a;
+}
+
+.election-status-badge.closed {
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  color: #dc2626;
+}
+
+.badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulse-badge 2s ease-in-out infinite;
+}
+
+@keyframes pulse-badge {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.8); }
+}
+
+/* Loading badge skeleton */
+.election-badge-loading {
+  width: 110px;
+  height: 28px;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 20px;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* CTA button */
+.election-cta-btn {
+  width: 100%;
+  padding: 16px 24px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #1a9ef4, #1a6fc4);
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: 'Space Grotesk', sans-serif;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 16px rgba(26, 158, 244, 0.35);
+}
+
+.election-cta-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(26, 158, 244, 0.45);
+}
+
+.election-cta-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.election-cta-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Mobile responsiveness for election portal */
+@media (max-width: 480px) {
+  .election-card {
+    border-radius: 20px;
+    margin: 0 4px;
+  }
+
+  .stat-value {
+    font-size: 1.25rem;
+  }
+
+  .election-cta-btn {
+    font-size: 0.9rem;
+    padding: 14px 20px;
+  }
+}
