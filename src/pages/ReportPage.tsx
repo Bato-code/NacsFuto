@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Shield, AlertCircle, CheckCircle, Lock } from 'lucide-react'
+import { Shield, AlertCircle, CheckCircle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { Link } from 'react-router-dom'
@@ -7,7 +7,7 @@ import { Link } from 'react-router-dom'
 const CATEGORIES = ['General Feedback', 'Complaint', 'Security Concern', 'Academic Issue', 'Misconduct', 'Suggestion', 'Other']
 
 export default function ReportPage() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const [category, setCategory] = useState('')
   const [subject, setSubject] = useState('')
   const [message, setMessage] = useState('')
@@ -50,8 +50,6 @@ export default function ReportPage() {
     )
   }
 
-  const isGuest = !user
-
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
       <div className="flex justify-center mb-4"><span className="terminal-badge">💬 ./report</span></div>
@@ -91,41 +89,32 @@ export default function ReportPage() {
           </div>
         </div>
 
-        {/* Form — always shown, submit locked for guests */}
+        {/* Form */}
         <div className="md:col-span-2 glass-card p-5 sm:p-6">
-          {/* Guest sign-in notice at top of form */}
-          {isGuest && (
-            <div className="flex items-center gap-3 rounded-lg p-3 mb-5"
-              style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-border)' }}>
-              <Lock className="w-4 h-4 shrink-0" style={{ color: 'var(--accent)' }} />
-              <p className="text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-                You must{' '}
-                <Link to="/login" style={{ color: 'var(--accent)' }} className="font-semibold hover:underline">
-                  sign in
-                </Link>
-                {' '}to submit a report. You can fill the form below and sign in when ready.
-              </p>
-            </div>
-          )}
-
           {error && (
             <div className="alert-error mb-4">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
-
+          {!user && (
+            <div className="rounded-lg p-3 mb-4 flex items-center gap-2"
+              style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-border)' }}>
+              <AlertCircle className="w-4 h-4 shrink-0" style={{ color: 'var(--accent)' }} />
+              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                <Link to="/login" style={{ color: 'var(--accent)' }} className="font-semibold hover:underline">Sign in</Link>
+                {' '}to submit a report. You can preview the form below.
+              </p>
+            </div>
+          )}
           <div className="space-y-4">
             <div>
               <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                 Category <span style={{ color: '#ef4444' }}>*</span>
               </label>
-              <select
-                className="cyber-select"
-                value={category}
-                onChange={e => setCategory(e.target.value)}
-                disabled={isGuest}
-                style={isGuest ? { opacity: 0.6, cursor: 'not-allowed' } : {}}>
+              <select className="cyber-select" value={category}
+                onChange={e => user ? setCategory(e.target.value) : undefined}
+                disabled={!user}>
                 <option value="">Select a category</option>
                 {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
@@ -134,62 +123,45 @@ export default function ReportPage() {
               <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                 Subject <span style={{ color: '#ef4444' }}>*</span>
               </label>
-              <input
-                className="cyber-input"
-                placeholder="Brief description of the issue or topic"
-                value={subject}
-                onChange={e => setSubject(e.target.value)}
-                disabled={isGuest}
-                style={isGuest ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
-              />
+              <input className="cyber-input" placeholder="Brief description of the issue or topic"
+                value={subject} onChange={e => user ? setSubject(e.target.value) : undefined}
+                readOnly={!user} />
             </div>
             <div>
               <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                 Message <span style={{ color: '#ef4444' }}>*</span>
               </label>
-              <textarea
-                className="cyber-input resize-none h-32"
+              <textarea className="cyber-input resize-none h-32"
                 placeholder="Provide detailed information about your report, complaint, or suggestion..."
-                value={message}
-                onChange={e => setMessage(e.target.value)}
-                disabled={isGuest}
-                style={isGuest ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
-              />
+                value={message} onChange={e => user ? setMessage(e.target.value) : undefined}
+                readOnly={!user} />
             </div>
             <div>
               <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={includeContact}
-                  onChange={e => setIncludeContact(e.target.checked)}
-                  className="w-4 h-4 accent-sky-400"
-                  disabled={isGuest}
-                />
-                <span className="text-sm" style={{ color: isGuest ? 'var(--text-muted)' : 'var(--text-secondary)' }}>
+                <input type="checkbox" checked={includeContact}
+                  onChange={e => user ? setIncludeContact(e.target.checked) : undefined}
+                  className="w-4 h-4 accent-sky-400" disabled={!user} />
+                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
                   Include contact information for follow-up (optional)
                 </span>
               </label>
-              {includeContact && !isGuest && (
+              {includeContact && (
                 <input className="cyber-input mt-2" placeholder="Your name or email for follow-up"
-                  value={contactInfo} onChange={e => setContactInfo(e.target.value)} />
+                  value={contactInfo} onChange={e => setContactInfo(e.target.value)}
+                  readOnly={!user} />
               )}
             </div>
-
-            {/* Submit button — disabled + tooltip for guests */}
-            <div className="relative">
-              {isGuest ? (
-                <Link to="/login" className="cyber-btn w-full justify-center flex items-center gap-2"
-                  style={{ opacity: 1 }}>
-                  <Lock className="w-4 h-4" />
-                  Sign In to Submit Report
-                </Link>
-              ) : (
-                <button onClick={handleSubmit} disabled={loading} className="cyber-btn w-full">
-                  <Shield className="w-4 h-4" />
-                  {loading ? 'Submitting...' : 'Submit Report'}
-                </button>
-              )}
-            </div>
+            {user ? (
+              <button onClick={handleSubmit} disabled={loading} className="cyber-btn w-full">
+                <Shield className="w-4 h-4" />
+                {loading ? 'Submitting...' : 'Submit Report'}
+              </button>
+            ) : (
+              <Link to="/login" className="cyber-btn w-full justify-center">
+                <Shield className="w-4 h-4" />
+                Sign In to Submit Report
+              </Link>
+            )}
           </div>
         </div>
       </div>

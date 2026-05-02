@@ -32,9 +32,6 @@
   --btn-gradient:   linear-gradient(135deg, #38bdf8, #0284c7);
   --btn-shadow:     rgba(56,189,248,0.3);
   --section-divider: linear-gradient(90deg, transparent, #1e2d4a, transparent);
-  --footer-text:    #94a3b8;
-  --footer-heading: #f1f5f9;
-  --footer-muted:   #475569;
 }
 
 /* ─── Light Mode ──────────────────────────────────────────────────────────── */
@@ -52,7 +49,7 @@
   --text-secondary: #334155;
   --text-muted:     #64748b;
   --nav-bg:         rgba(255,255,255,0.97);
-  --footer-bg:      #e8eef6;
+  --footer-bg:      rgba(240,244,248,0.98);
   --input-bg:       #ffffff;
   --card-glass:     rgba(255,255,255,0.95);
   --shadow:         rgba(15,23,42,0.12);
@@ -66,9 +63,6 @@
   --btn-gradient:   linear-gradient(135deg, #0ea5e9, #0369a1);
   --btn-shadow:     rgba(2,132,199,0.3);
   --section-divider: linear-gradient(90deg, transparent, #c8d9ee, transparent);
-  --footer-text:    #334155;
-  --footer-heading: #0f172a;
-  --footer-muted:   #64748b;
 }
 
 /* ─── Base ────────────────────────────────────────────────────────────────── */
@@ -152,13 +146,6 @@ body {
   width: 100%;
   transition: border-color 0.2s, box-shadow 0.2s, background 0.3s;
   outline: none;
-  /* When used with pl-9 (icon inside), Tailwind's pl-9 = 2.25rem = 36px */
-  /* This is enough clearance for a 16px icon at left-3 (12px) */
-}
-/* Explicit padding-left for icon inputs — supplements Tailwind pl-10 */
-.cyber-input.pl-10 {
-  padding-left: 2.75rem;
-}
 }
 .cyber-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
 .cyber-input::placeholder { color: var(--text-muted); }
@@ -206,8 +193,6 @@ body {
 .site-footer {
   background: var(--footer-bg);
   border-top: 1px solid var(--border);
-  color: var(--text-secondary);
-  transition: background 0.3s, color 0.3s;
 }
 
 /* ─── Terminal elements ───────────────────────────────────────────────────── */

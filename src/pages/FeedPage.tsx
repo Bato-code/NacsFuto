@@ -297,7 +297,7 @@ function PostCard({ post, currentUserId, isAdmin, onDelete, onLike, highlighted 
           <span>{comments.length || 0}</span>
         </button>
 
-        {/* Share button + popover — available to everyone */}
+        {/* Share button + popover */}
         <div className="relative ml-auto">
           <button
             onClick={() => setShowShare(s => !s)}
@@ -473,68 +473,86 @@ export default function FeedPage() {
       </h1>
       <p className="text-center text-sm mb-8" style={{ color: 'var(--text-secondary)' }}>Official NACS announcements</p>
 
-      {!user && (
-        <div className="rounded-lg p-3 mb-6 text-center text-sm" style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-border)' }}>
-          <Link to="/login" style={{ color: 'var(--accent)' }} className="hover:underline">Sign in</Link>
-          <span style={{ color: 'var(--text-secondary)' }}> to like and comment on posts</span>
-        </div>
-      )}
-
       {/* Create post box */}
-      {user && (
-        <div className="glass-card p-4 mb-6">
-          {!showCreate ? (
-            <button onClick={() => setShowCreate(true)}
+      <div className="glass-card p-4 mb-6">
+        {!user ? (
+          /* ── Guest: show share box but prompt sign-in on click ── */
+          <div>
+            <button
+              onClick={() => {
+                const el = document.createElement('div')
+                el.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;'
+                el.innerHTML = ''
+                document.body.appendChild(el)
+                window.location.href = '/login'
+              }}
               className="w-full flex items-center gap-3 text-left"
               style={{ color: 'var(--text-muted)' }}>
               <div className="w-8 h-8 rounded-full border flex items-center justify-center text-xs font-bold"
                 style={{ borderColor: 'var(--accent-border)', background: 'var(--accent-dim)', color: 'var(--accent)' }}>
-                {(profile?.name || 'U')[0].toUpperCase()}
+                ?
               </div>
               <span className="text-sm flex-1 py-2 px-3 rounded-lg" style={{ background: 'var(--input-bg)', border: '1px solid var(--border)' }}>
                 Share something with NACS...
               </span>
               <Plus className="w-4 h-4 shrink-0" style={{ color: 'var(--accent)' }} />
             </button>
-          ) : (
-            <div className="space-y-3">
-              <textarea className="cyber-input resize-none h-24"
-                placeholder="Share something with NACS..."
-                value={newPostContent}
-                onChange={e => setNewPostContent(e.target.value)} />
-              <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
-                {(['file', 'embed'] as const).map(m => (
-                  <button key={m} onClick={() => setMediaMode(m)}
-                    className="flex-1 py-1.5 text-xs font-medium transition-colors"
-                    style={mediaMode === m
-                      ? { background: 'var(--accent-dim)', color: 'var(--accent)' }
-                      : { background: 'var(--input-bg)', color: 'var(--text-muted)' }}>
-                    {m === 'file' ? '📁 Media Upload' : '🎬 Embed Video'}
-                  </button>
-                ))}
-              </div>
-              {mediaMode === 'file' ? (
-                <FileUploader label="Attach media (optional)" value={mediaUrl} onChange={setMediaUrl} accept="image/*,video/*" />
-              ) : (
-                <div>
-                  <input className="cyber-input" placeholder="YouTube / Facebook / Instagram / Twitter URL"
-                    value={embedUrl} onChange={e => setEmbedUrl(e.target.value)} />
-                  <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Paste any YouTube, Facebook, IG or Twitter video link</p>
-                </div>
-              )}
-              <div className="flex gap-2">
-                <button onClick={createPost} disabled={posting} className="cyber-btn flex-1">
-                  {posting ? 'Submitting...' : isAdmin ? 'Post Now' : 'Submit for Approval'}
-                </button>
-                <button onClick={() => { setShowCreate(false); setNewPostContent(''); setMediaUrl(''); setEmbedUrl('') }}
-                  className="cyber-btn-ghost">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+            <p className="text-xs text-center mt-2" style={{ color: 'var(--text-muted)' }}>
+              <Link to="/login" style={{ color: 'var(--accent)' }} className="hover:underline">Sign in</Link>
+              {' '}to like, comment and share posts
+            </p>
+          </div>
+        ) : !showCreate ? (
+          <button onClick={() => setShowCreate(true)}
+            className="w-full flex items-center gap-3 text-left"
+            style={{ color: 'var(--text-muted)' }}>
+            <div className="w-8 h-8 rounded-full border flex items-center justify-center text-xs font-bold"
+              style={{ borderColor: 'var(--accent-border)', background: 'var(--accent-dim)', color: 'var(--accent)' }}>
+              {(profile?.name || 'U')[0].toUpperCase()}
             </div>
-          )}
-        </div>
-      )}
+            <span className="text-sm flex-1 py-2 px-3 rounded-lg" style={{ background: 'var(--input-bg)', border: '1px solid var(--border)' }}>
+              Share something with NACS...
+            </span>
+            <Plus className="w-4 h-4 shrink-0" style={{ color: 'var(--accent)' }} />
+          </button>
+        ) : (
+          <div className="space-y-3">
+            <textarea className="cyber-input resize-none h-24"
+              placeholder="Share something with NACS..."
+              value={newPostContent}
+              onChange={e => setNewPostContent(e.target.value)} />
+            <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
+              {(['file', 'embed'] as const).map(m => (
+                <button key={m} onClick={() => setMediaMode(m)}
+                  className="flex-1 py-1.5 text-xs font-medium transition-colors"
+                  style={mediaMode === m
+                    ? { background: 'var(--accent-dim)', color: 'var(--accent)' }
+                    : { background: 'var(--input-bg)', color: 'var(--text-muted)' }}>
+                  {m === 'file' ? '📁 Media Upload' : '🎬 Embed Video'}
+                </button>
+              ))}
+            </div>
+            {mediaMode === 'file' ? (
+              <FileUploader label="Attach media (optional)" value={mediaUrl} onChange={setMediaUrl} accept="image/*,video/*" />
+            ) : (
+              <div>
+                <input className="cyber-input" placeholder="YouTube / Facebook / Instagram / Twitter URL"
+                  value={embedUrl} onChange={e => setEmbedUrl(e.target.value)} />
+                <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Paste any YouTube, Facebook, IG or Twitter video link</p>
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button onClick={createPost} disabled={posting} className="cyber-btn flex-1">
+                {posting ? 'Submitting...' : isAdmin ? 'Post Now' : 'Submit for Approval'}
+              </button>
+              <button onClick={() => { setShowCreate(false); setNewPostContent(''); setMediaUrl(''); setEmbedUrl('') }}
+                className="cyber-btn-ghost">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Back to full feed link when viewing a linked post */}
       {linkedPostId && (

@@ -136,7 +136,7 @@ export default function CoursesPage() {
       {/* Filters */}
       <div className="glass-card p-3 sm:p-4 mb-6 flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-muted)' }} />
           <input className="cyber-input pl-10" placeholder="Search courses and research..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <select className="cyber-select sm:w-44" value={category} onChange={e => setCategory(e.target.value)}>
