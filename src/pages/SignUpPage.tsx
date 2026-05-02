@@ -28,10 +28,10 @@ export default function SignUpPage() {
     if (!matric.trim()) { setError('Please enter your matriculation number'); return }
     setLoading(true); setError('')
 
-    // Check if matric is whitelisted
+    // Check whitelist
     const { data: whitelist } = await supabase
       .from('whitelisted_matric_numbers')
-      .select('*')
+      .select('matric_number')
       .eq('matric_number', matric.trim())
       .eq('is_active', true)
       .single()
@@ -42,15 +42,16 @@ export default function SignUpPage() {
       return
     }
 
-    // Fix 2: Check if matric already registered — give specific message
-    const { data: existing } = await supabase
-      .from('profiles')
+    // FIX 2: Check users table (has matric_number column already in live DB)
+    const { data: existingUser } = await supabase
+      .from('users')
       .select('id')
       .eq('matric_number', matric.trim())
       .single()
 
     setLoading(false)
-    if (existing) {
+
+    if (existingUser) {
       setError('This registration number has already been registered by another user. Please contact your admin.')
       return
     }
@@ -58,15 +59,16 @@ export default function SignUpPage() {
     setStep(2)
   }
 
-  // Fix 4: Real-time username availability check
+  // FIX 4: Real-time username check — case-insensitive (JohnDoe = johndoe = JOHNDOE)
   const checkUsername = async (val: string) => {
     setUsername(val)
     if (!val.trim() || val.length < 3) { setUsernameStatus('idle'); return }
     setUsernameLoading(true)
+    // ilike = case-insensitive LIKE — exact string but ignores upper/lower case
     const { data } = await supabase
-      .from('profiles')
+      .from('users')
       .select('id')
-      .eq('username', val.trim().toLowerCase())
+      .ilike('username', val.trim())
       .single()
     setUsernameLoading(false)
     setUsernameStatus(data ? 'taken' : 'available')
@@ -79,11 +81,11 @@ export default function SignUpPage() {
     if (password.length < 6) { setError('Password must be at least 6 characters'); return }
     setLoading(true); setError('')
 
-    // Fix 3: Check if email already used
+    // FIX 3: Check for duplicate email — ilike so JOHN@gmail.com == john@gmail.com
     const { data: emailCheck } = await supabase
-      .from('profiles')
+      .from('users')
       .select('id')
-      .eq('email', email.trim().toLowerCase())
+      .ilike('email', email.trim())
       .single()
 
     if (emailCheck) {
@@ -92,11 +94,28 @@ export default function SignUpPage() {
       return
     }
 
+    // FIX 4: Final username guard — ilike catches JohnDoe vs johndoe vs JOHNDOE
+    const { data: usernameCheck } = await supabase
+      .from('users')
+      .select('id')
+      .ilike('username', username.trim())
+      .single()
+
+    if (usernameCheck) {
+      setLoading(false)
+      setUsernameStatus('taken')
+      setError('This username is already taken. Please choose a different one.')
+      return
+    }
+
     const { error } = await signUp(email, password, name, matric, username.trim().toLowerCase())
     setLoading(false)
     if (error) {
-      // Also catch Supabase auth-level duplicate email
-      if (error.message?.toLowerCase().includes('already registered') || error.message?.toLowerCase().includes('already been registered')) {
+      if (
+        error.message?.toLowerCase().includes('already registered') ||
+        error.message?.toLowerCase().includes('already been registered') ||
+        error.message?.toLowerCase().includes('user already registered')
+      ) {
         setError('This email address is already linked to an existing account. Please use a different email.')
       } else {
         setError(error.message)
@@ -131,16 +150,12 @@ export default function SignUpPage() {
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-md">
-        {/* Logo */}
         <div className="text-center mb-6">
-          <div className="w-14 h-14 rounded-full border-2 overflow-hidden mx-auto mb-3"
-            style={{ borderColor: 'var(--accent)' }}>
+          <div className="w-14 h-14 rounded-full border-2 overflow-hidden mx-auto mb-3" style={{ borderColor: 'var(--accent)' }}>
             <img src="/nacs-logo.jpeg" alt="NACS Logo" className="w-full h-full object-cover" />
           </div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Join NACS FUTO</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Create your student account</p>
-
-          {/* Step indicator */}
           <div className="flex items-center justify-center gap-3 mt-4">
             {[1, 2].map((s, i) => (
               <div key={s} className="flex items-center gap-1.5">
@@ -179,7 +194,8 @@ export default function SignUpPage() {
               <div className="input-icon-wrap mb-4">
                 <User className="input-icon" />
                 <input className="cyber-input" placeholder="e.g., 20251234567"
-                  value={matric} onChange={e => setMatric(e.target.value)} onKeyDown={e => e.key === 'Enter' && verifyMatric()} />
+                  value={matric} onChange={e => setMatric(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && verifyMatric()} />
               </div>
               <button onClick={verifyMatric} disabled={loading} className="cyber-btn w-full">
                 {loading ? 'Verifying...' : <><span>Verify & Continue</span><ArrowRight className="w-4 h-4" /></>}
@@ -213,7 +229,7 @@ export default function SignUpPage() {
                   </div>
                 </div>
 
-                {/* Username — Fix 4 */}
+                {/* Username — realtime check */}
                 <div>
                   <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                     Username <span style={{ color: '#ef4444' }}>*</span>
@@ -224,6 +240,7 @@ export default function SignUpPage() {
                       value={username}
                       onChange={e => checkUsername(e.target.value)}
                       style={{
+                        paddingRight: '5rem',
                         borderColor: usernameStatus === 'taken' ? '#ef4444'
                           : usernameStatus === 'available' ? '#10b981'
                           : undefined
@@ -235,10 +252,10 @@ export default function SignUpPage() {
                       </span>
                     )}
                     {!usernameLoading && usernameStatus === 'available' && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-400 text-xs font-semibold">✓ Available</span>
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold" style={{ color: '#10b981' }}>✓ Free</span>
                     )}
                     {!usernameLoading && usernameStatus === 'taken' && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-red-400 text-xs font-semibold">✗ Taken</span>
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold" style={{ color: '#ef4444' }}>✗ Taken</span>
                     )}
                   </div>
                   {usernameStatus === 'taken' && (
@@ -258,56 +275,62 @@ export default function SignUpPage() {
                   </div>
                 </div>
 
-                {/* Password — Fix 1 */}
+                {/* Password with show/hide */}
                 <div>
                   <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                     Password <span style={{ color: '#ef4444' }}>*</span>
                   </label>
                   <div className="input-icon-wrap relative">
                     <Lock className="input-icon" />
-                    <input className="cyber-input" type={showPassword ? 'text' : 'password'}
-                      placeholder="Create a password" value={password}
+                    <input className="cyber-input"
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="Create a password"
+                      value={password}
                       onChange={e => setPassword(e.target.value)}
                       style={{ paddingRight: '2.5rem' }} />
                     <button type="button"
-                      className="absolute right-3 top-1/2 -translate-y-1/2"
-                      style={{ color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
                       onClick={() => setShowPassword(v => !v)}
                       tabIndex={-1}
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}>
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
 
-                {/* Confirm Password — Fix 1 */}
+                {/* Confirm Password with show/hide */}
                 <div>
                   <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                     Confirm Password <span style={{ color: '#ef4444' }}>*</span>
                   </label>
                   <div className="input-icon-wrap relative">
                     <Lock className="input-icon" />
-                    <input className="cyber-input" type={showConfirm ? 'text' : 'password'}
-                      placeholder="Confirm your password" value={confirmPassword}
+                    <input className="cyber-input"
+                      type={showConfirm ? 'text' : 'password'}
+                      placeholder="Confirm your password"
+                      value={confirmPassword}
                       onChange={e => setConfirmPassword(e.target.value)}
                       style={{ paddingRight: '2.5rem' }} />
                     <button type="button"
-                      className="absolute right-3 top-1/2 -translate-y-1/2"
-                      style={{ color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
                       onClick={() => setShowConfirm(v => !v)}
                       tabIndex={-1}
-                      aria-label={showConfirm ? 'Hide password' : 'Show password'}>
+                      aria-label={showConfirm ? 'Hide password' : 'Show password'}
+                      style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}>
                       {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
 
               </div>
-              <button onClick={handleSignUp} disabled={loading || usernameStatus === 'taken'} className="cyber-btn w-full mt-4">
+
+              <button onClick={handleSignUp}
+                disabled={loading || usernameStatus === 'taken'}
+                className="cyber-btn w-full mt-4">
                 {loading ? 'Creating Account...' : 'Create Account'}
               </button>
               <button onClick={() => { setStep(1); setError('') }}
-                className="text-xs mt-2 hover:underline w-full text-center block" style={{ color: 'var(--text-muted)' }}>
+                className="text-xs mt-2 hover:underline w-full text-center block"
+                style={{ color: 'var(--text-muted)' }}>
                 ← Back
               </button>
             </div>

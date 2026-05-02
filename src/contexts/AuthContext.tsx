@@ -63,23 +63,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       password,
       options: { data: { name, matric_number: matricNumber, username } }
     })
+
     if (!error && data.user) {
+      // Insert into profiles (only columns that exist in live DB)
       await supabase.from('profiles').insert({
         id: data.user.id,
         matric_number: matricNumber,
         name,
-        email: email.trim().toLowerCase(),
-        username: username?.trim().toLowerCase() || null,
         is_admin: false
       })
+
+      // Insert into users table (has email, username, matric_number already)
       await supabase.from('users').insert({
         id: data.user.id,
-        email,
+        email: email.trim().toLowerCase(),
         name,
         matric_number: matricNumber,
+        username: username?.trim().toLowerCase() || null,
         role: 'student'
       })
     }
+
     return { error }
   }
 
