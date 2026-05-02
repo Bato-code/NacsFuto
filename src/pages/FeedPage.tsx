@@ -297,7 +297,7 @@ function PostCard({ post, currentUserId, isAdmin, onDelete, onLike, highlighted 
           <span>{comments.length || 0}</span>
         </button>
 
-        {/* Share button + popover */}
+        {/* Share button + popover — available to everyone */}
         <div className="relative ml-auto">
           <button
             onClick={() => setShowShare(s => !s)}
@@ -476,7 +476,7 @@ export default function FeedPage() {
       {!user && (
         <div className="rounded-lg p-3 mb-6 text-center text-sm" style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-border)' }}>
           <Link to="/login" style={{ color: 'var(--accent)' }} className="hover:underline">Sign in</Link>
-          <span style={{ color: 'var(--text-secondary)' }}> to like, comment and share posts</span>
+          <span style={{ color: 'var(--text-secondary)' }}> to like and comment on posts</span>
         </div>
       )}
 

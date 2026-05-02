@@ -65,7 +65,7 @@ export default function SignUpPage() {
   }
 
   const inputIcon = (Icon: any) => (
-    <Icon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+    <Icon className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
   )
 
   return (
@@ -118,7 +118,7 @@ export default function SignUpPage() {
               </label>
               <div className="relative mb-4">
                 {inputIcon(User)}
-                <input className="cyber-input pl-9" placeholder="e.g., 20251234567"
+                <input className="cyber-input pl-10" placeholder="e.g., 20251234567"
                   value={matric} onChange={e => setMatric(e.target.value)} onKeyDown={e => e.key === 'Enter' && verifyMatric()} />
               </div>
               <button onClick={verifyMatric} disabled={loading} className="cyber-btn w-full">
@@ -151,8 +151,8 @@ export default function SignUpPage() {
                       {label} <span style={{ color: '#ef4444' }}>*</span>
                     </label>
                     <div className="relative">
-                      <Icon className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
-                      <input className="cyber-input pl-9" type={type} placeholder={ph} value={val} onChange={e => set(e.target.value)} />
+                      <Icon className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+                      <input className="cyber-input pl-10" type={type} placeholder={ph} value={val} onChange={e => set(e.target.value)} />
                     </div>
                   </div>
                 ))}

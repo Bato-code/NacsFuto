@@ -67,8 +67,8 @@ export default function LoginPage() {
                 Email Address <span style={{ color: '#ef4444' }}>*</span>
               </label>
               <div className="relative">
-                <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
-                <input className="cyber-input pl-9" type="email" placeholder="your.email@example.com"
+                <Mail className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+                <input className="cyber-input pl-10" type="email" placeholder="your.email@example.com"
                   value={email} onChange={e => setEmail(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleLogin()} />
               </div>
@@ -78,8 +78,8 @@ export default function LoginPage() {
                 Password <span style={{ color: '#ef4444' }}>*</span>
               </label>
               <div className="relative">
-                <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
-                <input className="cyber-input pl-9 pr-10" type={showPass ? 'text' : 'password'}
+                <Lock className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+                <input className="cyber-input pl-10 pr-10" type={showPass ? 'text' : 'password'}
                   placeholder="Enter your password"
                   value={password} onChange={e => setPassword(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleLogin()} />

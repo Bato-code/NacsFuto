@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom'
 import { MapPin, Mail } from 'lucide-react'
 
 export default function Footer() {
-  // Live current date — updates on every render
   const now = new Date()
   const lastUpdated = now.toLocaleDateString('en-GB', {
     day: '2-digit', month: '2-digit', year: 'numeric'
@@ -22,7 +21,7 @@ export default function Footer() {
     },
     {
       label: 'Instagram',
-      href: 'https://instagram.com/nacsfuto',
+      href: 'https://www.instagram.com/official_nacs?utm_source=qr&igsh=Z3MzMmw5MDU4b2Nj',
       hoverColor: '#ec4899',
       icon: (
         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -42,7 +41,7 @@ export default function Footer() {
     },
     {
       label: 'WhatsApp',
-      href: 'https://wa.me/nacsfuto',
+      href: 'https://www.whatsapp.com/channel/0029VaO69XSLdQemYnqvAr02',
       hoverColor: '#25d366',
       icon: (
         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -77,11 +76,11 @@ export default function Footer() {
                 <img src="/nacs-logo.jpeg" alt="NACS Logo" className="w-full h-full object-cover" />
               </div>
               <div>
-                <div className="font-bold text-sm text-white">NACS FUTO</div>
+                <div className="font-bold text-sm" style={{ color: 'var(--footer-heading)' }}>NACS FUTO</div>
                 <div className="text-xs font-mono" style={{ color: 'var(--accent)' }}>Securing Tomorrow</div>
               </div>
             </div>
-            <p className="text-sm leading-relaxed mb-5 max-w-xs" style={{ color: '#94a3b8' }}>
+            <p className="text-sm leading-relaxed mb-5 max-w-xs" style={{ color: 'var(--footer-text)' }}>
               Nurturing Nigeria's future cybersecurity professionals — from FUTO to the world. Empowering students through knowledge, collaboration, and innovation.
             </p>
 
@@ -91,7 +90,7 @@ export default function Footer() {
                 <a key={s.label} href={s.href} target="_blank" rel="noopener noreferrer"
                   title={s.label}
                   className="w-9 h-9 rounded-full border flex items-center justify-center transition-all duration-200"
-                  style={{ borderColor: '#1e2d4a', color: '#64748b' }}
+                  style={{ borderColor: 'var(--border)', color: 'var(--footer-muted)' }}
                   onMouseEnter={e => {
                     const el = e.currentTarget as HTMLElement
                     el.style.color = s.hoverColor
@@ -101,8 +100,8 @@ export default function Footer() {
                   }}
                   onMouseLeave={e => {
                     const el = e.currentTarget as HTMLElement
-                    el.style.color = '#64748b'
-                    el.style.borderColor = '#1e2d4a'
+                    el.style.color = 'var(--footer-muted)'
+                    el.style.borderColor = 'var(--border)'
                     el.style.background = 'transparent'
                     el.style.transform = ''
                   }}>
@@ -114,15 +113,15 @@ export default function Footer() {
 
           {/* Quick Links */}
           <div>
-            <h4 className="font-semibold text-sm mb-4 text-white">Quick Links</h4>
+            <h4 className="font-semibold text-sm mb-4" style={{ color: 'var(--footer-heading)' }}>Quick Links</h4>
             <ul className="space-y-2">
               {QUICK_LINKS.map(l => (
                 <li key={l.to}>
                   <Link to={l.to}
                     className="text-sm transition-colors flex items-center gap-1.5 group"
-                    style={{ color: '#64748b' }}
+                    style={{ color: 'var(--footer-text)' }}
                     onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'var(--accent)'}
-                    onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = '#64748b'}>
+                    onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'var(--footer-text)'}>
                     <span style={{ color: 'var(--accent)', opacity: 0.5 }} className="group-hover:opacity-100 transition-opacity">›</span>
                     {l.label}
                   </Link>
@@ -133,21 +132,31 @@ export default function Footer() {
 
           {/* Contact */}
           <div>
-            <h4 className="font-semibold text-sm mb-4 text-white">Contact</h4>
+            <h4 className="font-semibold text-sm mb-4" style={{ color: 'var(--footer-heading)' }}>Contact</h4>
             <div className="space-y-3">
               <div className="flex items-start gap-2.5">
                 <MapPin className="w-4 h-4 mt-0.5 shrink-0" style={{ color: 'var(--accent)' }} />
-                <span className="text-sm leading-relaxed" style={{ color: '#94a3b8' }}>
-                  Federal University of Technology<br />Owerri, Imo State, Nigeria
+                <span className="text-sm leading-relaxed" style={{ color: 'var(--footer-text)' }}>
+                  <a
+                    href="https://futo.edu.ng/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="transition-colors hover:underline"
+                    style={{ color: 'var(--footer-text)' }}
+                    onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'var(--accent)'}
+                    onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'var(--footer-text)'}>
+                    Federal University of Technology
+                  </a>
+                  <br />Owerri, Imo State, Nigeria
                 </span>
               </div>
               <div className="flex items-center gap-2.5">
                 <Mail className="w-4 h-4 shrink-0" style={{ color: 'var(--accent)' }} />
                 <a href="mailto:nacsfuto@gmail.com"
                   className="text-sm transition-colors"
-                  style={{ color: '#94a3b8' }}
+                  style={{ color: 'var(--footer-text)' }}
                   onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'var(--accent)'}
-                  onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = '#94a3b8'}>
+                  onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'var(--footer-text)'}>
                   nacsfuto@gmail.com
                 </a>
               </div>
@@ -159,12 +168,18 @@ export default function Footer() {
         <div className="section-divider" />
 
         {/* ── Bottom bar ── */}
-        <div className="flex flex-col sm:flex-row justify-between items-center gap-3 text-xs" style={{ color: '#475569' }}>
+        <div className="flex flex-col sm:flex-row justify-between items-center gap-3 text-xs" style={{ color: 'var(--footer-muted)' }}>
           <span>© {year} CyberSecurity FUTO. All rights reserved.</span>
           <div className="flex gap-4 flex-wrap justify-center">
-            <a href="#" className="hover:text-white transition-colors">Privacy Policy</a>
-            <a href="#" className="hover:text-white transition-colors">Terms of Service</a>
-            <a href="#" className="hover:text-white transition-colors">Security Policy</a>
+            <a href="#" className="transition-colors" style={{ color: 'var(--footer-muted)' }}
+              onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'var(--footer-heading)'}
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'var(--footer-muted)'}>Privacy Policy</a>
+            <a href="#" className="transition-colors" style={{ color: 'var(--footer-muted)' }}
+              onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'var(--footer-heading)'}
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'var(--footer-muted)'}>Terms of Service</a>
+            <a href="#" className="transition-colors" style={{ color: 'var(--footer-muted)' }}
+              onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'var(--footer-heading)'}
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'var(--footer-muted)'}>Security Policy</a>
           </div>
         </div>
 
@@ -176,7 +191,7 @@ export default function Footer() {
           <span> | Last updated: {lastUpdated}</span>
         </div>
 
-        <div className="text-center mt-3 text-xs font-mono" style={{ color: '#334155' }}>
+        <div className="text-center mt-3 text-xs font-mono" style={{ color: 'var(--footer-muted)' }}>
           2026/2027 | Office of the Director of Research/ICT | Bato
         </div>
       </div>

@@ -116,8 +116,8 @@ export default function PastQuestionsPage() {
           {SEMESTERS.map(s => <option key={s}>{s}</option>)}
         </select>
         <div className="relative flex-1 min-w-40">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
-          <input className="cyber-input pl-9" placeholder="Search by Course Code or Title" value={courseCode} onChange={e => setCourseCode(e.target.value)} />
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+          <input className="cyber-input pl-10" placeholder="Search by Course Code or Title" value={courseCode} onChange={e => setCourseCode(e.target.value)} />
         </div>
       </div>
 
