@@ -9,7 +9,7 @@ export type Database = {
   public: {
     Tables: {
       profiles: {
-        Row: { id: string; matric_number: string; name: string; is_admin: boolean | null; created_at: string | null; updated_at: string | null }
+        Row: { id: string; matric_number: string; name: string; username: string | null; email: string | null; is_admin: boolean | null; created_at: string | null; updated_at: string | null }
       }
       users: {
         Row: { id: string; email: string; name: string; role: string | null; avatar_url: string | null; created_at: string | null; updated_at: string | null; matric_number: string | null }

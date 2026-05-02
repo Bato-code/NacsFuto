@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowRight, User, Lock, Mail, CheckCircle, AlertCircle } from 'lucide-react'
+import { ArrowRight, User, Lock, Mail, CheckCircle, AlertCircle, Eye, EyeOff, AtSign } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -12,33 +12,97 @@ export default function SignUpPage() {
   const [step, setStep] = useState(1)
   const [matric, setMatric] = useState('')
   const [name, setName] = useState('')
+  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [usernameLoading, setUsernameLoading] = useState(false)
+  const [usernameStatus, setUsernameStatus] = useState<'idle' | 'available' | 'taken'>('idle')
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
 
   const verifyMatric = async () => {
     if (!matric.trim()) { setError('Please enter your matriculation number'); return }
     setLoading(true); setError('')
-    const { data } = await supabase.from('whitelisted_matric_numbers')
-      .select('*').eq('matric_number', matric.trim()).eq('is_active', true).single()
-    if (!data) { setLoading(false); setError('Matric number not found or not eligible. Contact your admin.'); return }
-    const { data: existing } = await supabase.from('profiles').select('id').eq('matric_number', matric.trim()).single()
+
+    // Check if matric is whitelisted
+    const { data: whitelist } = await supabase
+      .from('whitelisted_matric_numbers')
+      .select('*')
+      .eq('matric_number', matric.trim())
+      .eq('is_active', true)
+      .single()
+
+    if (!whitelist) {
+      setLoading(false)
+      setError('Matric number not found or not eligible. Contact your admin.')
+      return
+    }
+
+    // Fix 2: Check if matric already registered — give specific message
+    const { data: existing } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('matric_number', matric.trim())
+      .single()
+
     setLoading(false)
-    if (existing) { setError('This matric number is already registered.'); return }
+    if (existing) {
+      setError('This registration number has already been registered by another user. Please contact your admin.')
+      return
+    }
+
     setStep(2)
   }
 
+  // Fix 4: Real-time username availability check
+  const checkUsername = async (val: string) => {
+    setUsername(val)
+    if (!val.trim() || val.length < 3) { setUsernameStatus('idle'); return }
+    setUsernameLoading(true)
+    const { data } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('username', val.trim().toLowerCase())
+      .single()
+    setUsernameLoading(false)
+    setUsernameStatus(data ? 'taken' : 'available')
+  }
+
   const handleSignUp = async () => {
-    if (!name || !email || !password) { setError('All fields are required'); return }
+    if (!name || !username || !email || !password) { setError('All fields are required'); return }
+    if (usernameStatus === 'taken') { setError('Username is already taken. Please choose a different one.'); return }
     if (password !== confirmPassword) { setError('Passwords do not match'); return }
     if (password.length < 6) { setError('Password must be at least 6 characters'); return }
     setLoading(true); setError('')
-    const { error } = await signUp(email, password, name, matric)
+
+    // Fix 3: Check if email already used
+    const { data: emailCheck } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('email', email.trim().toLowerCase())
+      .single()
+
+    if (emailCheck) {
+      setLoading(false)
+      setError('This email address is already linked to an existing account. Please use a different email.')
+      return
+    }
+
+    const { error } = await signUp(email, password, name, matric, username.trim().toLowerCase())
     setLoading(false)
-    if (error) { setError(error.message); return }
+    if (error) {
+      // Also catch Supabase auth-level duplicate email
+      if (error.message?.toLowerCase().includes('already registered') || error.message?.toLowerCase().includes('already been registered')) {
+        setError('This email address is already linked to an existing account. Please use a different email.')
+      } else {
+        setError(error.message)
+      }
+      return
+    }
     setSuccess(true)
   }
 
@@ -136,24 +200,110 @@ export default function SignUpPage() {
                 Matric: <span className="font-mono" style={{ color: 'var(--accent)' }}>{matric}</span> ✓
               </p>
               <div className="space-y-3">
-                {[
-                  { label: 'Full Name', icon: User, type: 'text', ph: 'Your full name', val: name, set: setName },
-                  { label: 'Email Address', icon: Mail, type: 'email', ph: 'your.email@example.com', val: email, set: setEmail },
-                  { label: 'Password', icon: Lock, type: 'password', ph: 'Create a password', val: password, set: setPassword },
-                  { label: 'Confirm Password', icon: Lock, type: 'password', ph: 'Confirm your password', val: confirmPassword, set: setConfirmPassword },
-                ].map(({ label, icon: Icon, type, ph, val, set }) => (
-                  <div key={label}>
-                    <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
-                      {label} <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
-                    <div className="input-icon-wrap">
-                      <Icon className="input-icon" />
-                      <input className="cyber-input" type={type} placeholder={ph} value={val} onChange={e => set(e.target.value)} />
-                    </div>
+
+                {/* Full Name */}
+                <div>
+                  <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
+                    Full Name <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <div className="input-icon-wrap">
+                    <User className="input-icon" />
+                    <input className="cyber-input" type="text" placeholder="Your full name"
+                      value={name} onChange={e => setName(e.target.value)} />
                   </div>
-                ))}
+                </div>
+
+                {/* Username — Fix 4 */}
+                <div>
+                  <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
+                    Username <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <div className="input-icon-wrap relative">
+                    <AtSign className="input-icon" />
+                    <input className="cyber-input" type="text" placeholder="Choose a unique username"
+                      value={username}
+                      onChange={e => checkUsername(e.target.value)}
+                      style={{
+                        borderColor: usernameStatus === 'taken' ? '#ef4444'
+                          : usernameStatus === 'available' ? '#10b981'
+                          : undefined
+                      }} />
+                    {usernameLoading && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2">
+                        <div className="w-3.5 h-3.5 border-2 border-t-transparent rounded-full animate-spin"
+                          style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+                      </span>
+                    )}
+                    {!usernameLoading && usernameStatus === 'available' && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-400 text-xs font-semibold">✓ Available</span>
+                    )}
+                    {!usernameLoading && usernameStatus === 'taken' && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-red-400 text-xs font-semibold">✗ Taken</span>
+                    )}
+                  </div>
+                  {usernameStatus === 'taken' && (
+                    <p className="text-xs mt-1" style={{ color: '#ef4444' }}>This username is already taken. Please choose a different one.</p>
+                  )}
+                </div>
+
+                {/* Email */}
+                <div>
+                  <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
+                    Email Address <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <div className="input-icon-wrap">
+                    <Mail className="input-icon" />
+                    <input className="cyber-input" type="email" placeholder="your.email@example.com"
+                      value={email} onChange={e => setEmail(e.target.value)} />
+                  </div>
+                </div>
+
+                {/* Password — Fix 1 */}
+                <div>
+                  <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
+                    Password <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <div className="input-icon-wrap relative">
+                    <Lock className="input-icon" />
+                    <input className="cyber-input" type={showPassword ? 'text' : 'password'}
+                      placeholder="Create a password" value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      style={{ paddingRight: '2.5rem' }} />
+                    <button type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2"
+                      style={{ color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+                      onClick={() => setShowPassword(v => !v)}
+                      tabIndex={-1}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}>
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Confirm Password — Fix 1 */}
+                <div>
+                  <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
+                    Confirm Password <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <div className="input-icon-wrap relative">
+                    <Lock className="input-icon" />
+                    <input className="cyber-input" type={showConfirm ? 'text' : 'password'}
+                      placeholder="Confirm your password" value={confirmPassword}
+                      onChange={e => setConfirmPassword(e.target.value)}
+                      style={{ paddingRight: '2.5rem' }} />
+                    <button type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2"
+                      style={{ color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+                      onClick={() => setShowConfirm(v => !v)}
+                      tabIndex={-1}
+                      aria-label={showConfirm ? 'Hide password' : 'Show password'}>
+                      {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
               </div>
-              <button onClick={handleSignUp} disabled={loading} className="cyber-btn w-full mt-4">
+              <button onClick={handleSignUp} disabled={loading || usernameStatus === 'taken'} className="cyber-btn w-full mt-4">
                 {loading ? 'Creating Account...' : 'Create Account'}
               </button>
               <button onClick={() => { setStep(1); setError('') }}

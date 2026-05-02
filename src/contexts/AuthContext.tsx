@@ -15,7 +15,7 @@ interface AuthContextType {
   profile: Profile | null
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error: any }>
-  signUp: (email: string, password: string, name: string, matricNumber: string) => Promise<{ error: any }>
+  signUp: (email: string, password: string, name: string, matricNumber: string, username?: string) => Promise<{ error: any }>
   signOut: () => Promise<void>
   isAdmin: boolean
 }
@@ -57,17 +57,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { error }
   }
 
-  const signUp = async (email: string, password: string, name: string, matricNumber: string) => {
+  const signUp = async (email: string, password: string, name: string, matricNumber: string, username?: string) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { name, matric_number: matricNumber } }
+      options: { data: { name, matric_number: matricNumber, username } }
     })
     if (!error && data.user) {
       await supabase.from('profiles').insert({
         id: data.user.id,
         matric_number: matricNumber,
         name,
+        email: email.trim().toLowerCase(),
+        username: username?.trim().toLowerCase() || null,
         is_admin: false
       })
       await supabase.from('users').insert({
