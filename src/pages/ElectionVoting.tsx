@@ -53,7 +53,7 @@ export default function ElectionVoting({ onBack, settings }: {
     if (user) {
       const [{ data: votes }, { data: submission }] = await Promise.all([
         supabase.from('election_votes').select('*').eq('voter_id', user.id),
-        supabase.from('election_submissions').select('id').eq('voter_id', user.id).single(),
+        supabase.from('election_submissions').select('id').eq('voter_id', user.id).maybeSingle(),
       ])
       const voteMap: VoteMap = {}
       ;(votes || []).forEach((v: any) => { voteMap[v.position] = v.candidate_id })
