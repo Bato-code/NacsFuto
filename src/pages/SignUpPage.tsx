@@ -91,13 +91,13 @@ export default function SignUpPage() {
 
     usernameTimer.current = setTimeout(async () => {
       setUsernameLoading(true)
-      const { data } = await supabase
-        .from('users')
-        .select('id')
-        .ilike('username', val.trim())
-        .maybeSingle()
+      // Check both tables — users for new accounts, profiles for older accounts
+      const [{ data: inUsers }, { data: inProfiles }] = await Promise.all([
+        supabase.from('users').select('id').ilike('username', val.trim()).maybeSingle(),
+        supabase.from('profiles').select('id').ilike('username', val.trim()).maybeSingle(),
+      ])
       setUsernameLoading(false)
-      setUsernameStatus(data ? 'taken' : 'available')
+      setUsernameStatus((inUsers || inProfiles) ? 'taken' : 'available')
     }, 400)
   }
 
@@ -136,14 +136,13 @@ export default function SignUpPage() {
       return
     }
 
-    // FIX: Final username guard — catches race conditions
-    const { data: usernameCheck } = await supabase
-      .from('users')
-      .select('id')
-      .ilike('username', username.trim())
-      .maybeSingle()
+    // FIX: Final username guard — check both tables, catches race conditions
+    const [{ data: userCheck }, { data: profileCheck }] = await Promise.all([
+      supabase.from('users').select('id').ilike('username', username.trim()).maybeSingle(),
+      supabase.from('profiles').select('id').ilike('username', username.trim()).maybeSingle(),
+    ])
 
-    if (usernameCheck) {
+    if (userCheck || profileCheck) {
       setLoading(false)
       setUsernameStatus('taken')
       setError('This username is already taken. Please choose a different one.')
