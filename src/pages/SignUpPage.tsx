@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, User, Lock, Mail, CheckCircle, AlertCircle, Eye, EyeOff, AtSign } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -9,6 +9,7 @@ export default function SignUpPage() {
   const [searchParams] = useSearchParams()
   const redirectTo = searchParams.get('redirect') || '/'
   const { signUp } = useAuth()
+
   const [step, setStep] = useState(1)
   const [matric, setMatric] = useState('')
   const [name, setName] = useState('')
@@ -24,17 +25,25 @@ export default function SignUpPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
 
-  const verifyMatric = async () => {
-    if (!matric.trim()) { setError('Please enter your matriculation number'); return }
-    setLoading(true); setError('')
+  // Debounce timer for username live-check
+  const usernameTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-    // Check whitelist
+  // ─── STEP 1: Verify matric number ──────────────────────────────────────────
+  const verifyMatric = async () => {
+    if (!matric.trim()) {
+      setError('Please enter your matriculation number')
+      return
+    }
+    setLoading(true)
+    setError('')
+
+    // 1. Must be on the whitelist
     const { data: whitelist } = await supabase
       .from('whitelisted_matric_numbers')
       .select('matric_number')
       .eq('matric_number', matric.trim())
       .eq('is_active', true)
-      .single()
+      .maybeSingle()
 
     if (!whitelist) {
       setLoading(false)
@@ -42,51 +51,84 @@ export default function SignUpPage() {
       return
     }
 
-    // FIX 2: Check users table (has matric_number column already in live DB)
+    // 2. FIX: Block if matric number already registered in users table
     const { data: existingUser } = await supabase
       .from('users')
       .select('id')
       .eq('matric_number', matric.trim())
-      .single()
-
-    setLoading(false)
+      .maybeSingle()
 
     if (existingUser) {
-      setError('This registration number has already been registered by another user. Please contact your admin.')
+      setLoading(false)
+      setError('This registration number is already linked to an existing account. Please log in instead.')
       return
     }
 
+    // 3. Also check profiles table as a safety net
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('matric_number', matric.trim())
+      .maybeSingle()
+
+    if (existingProfile) {
+      setLoading(false)
+      setError('This registration number is already linked to an existing account. Please log in instead.')
+      return
+    }
+
+    setLoading(false)
     setStep(2)
   }
 
-  // FIX 4: Real-time username check — case-insensitive (JohnDoe = johndoe = JOHNDOE)
-  const checkUsername = async (val: string) => {
+  // ─── Username live check — debounced 400ms, case-insensitive ───────────────
+  const checkUsername = (val: string) => {
     setUsername(val)
-    if (!val.trim() || val.length < 3) { setUsernameStatus('idle'); return }
-    setUsernameLoading(true)
-    // ilike = case-insensitive LIKE — exact string but ignores upper/lower case
-    const { data } = await supabase
-      .from('users')
-      .select('id')
-      .ilike('username', val.trim())
-      .single()
-    setUsernameLoading(false)
-    setUsernameStatus(data ? 'taken' : 'available')
+    setUsernameStatus('idle')
+
+    if (usernameTimer.current) clearTimeout(usernameTimer.current)
+    if (!val.trim() || val.length < 3) return
+
+    usernameTimer.current = setTimeout(async () => {
+      setUsernameLoading(true)
+      const { data } = await supabase
+        .from('users')
+        .select('id')
+        .ilike('username', val.trim())
+        .maybeSingle()
+      setUsernameLoading(false)
+      setUsernameStatus(data ? 'taken' : 'available')
+    }, 400)
   }
 
+  // ─── STEP 2: Create account ─────────────────────────────────────────────────
   const handleSignUp = async () => {
-    if (!name || !username || !email || !password) { setError('All fields are required'); return }
-    if (usernameStatus === 'taken') { setError('Username is already taken. Please choose a different one.'); return }
-    if (password !== confirmPassword) { setError('Passwords do not match'); return }
-    if (password.length < 6) { setError('Password must be at least 6 characters'); return }
-    setLoading(true); setError('')
+    if (!name.trim() || !username.trim() || !email.trim() || !password) {
+      setError('All fields are required')
+      return
+    }
+    if (usernameStatus === 'taken') {
+      setError('Username is already taken. Please choose a different one.')
+      return
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match')
+      return
+    }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters')
+      return
+    }
 
-    // FIX 3: Check for duplicate email — ilike so JOHN@gmail.com == john@gmail.com
+    setLoading(true)
+    setError('')
+
+    // FIX: Check for duplicate email — one email per account
     const { data: emailCheck } = await supabase
       .from('users')
       .select('id')
       .ilike('email', email.trim())
-      .single()
+      .maybeSingle()
 
     if (emailCheck) {
       setLoading(false)
@@ -94,12 +136,12 @@ export default function SignUpPage() {
       return
     }
 
-    // FIX 4: Final username guard — ilike catches JohnDoe vs johndoe vs JOHNDOE
+    // FIX: Final username guard — catches race conditions
     const { data: usernameCheck } = await supabase
       .from('users')
       .select('id')
       .ilike('username', username.trim())
-      .single()
+      .maybeSingle()
 
     if (usernameCheck) {
       setLoading(false)
@@ -108,13 +150,23 @@ export default function SignUpPage() {
       return
     }
 
-    const { error } = await signUp(email, password, name, matric, username.trim().toLowerCase())
+    const { error } = await signUp(
+      email.trim(),
+      password,
+      name.trim(),
+      matric.trim(),
+      username.trim().toLowerCase()
+    )
+
     setLoading(false)
+
     if (error) {
+      const msg = error.message?.toLowerCase() ?? ''
       if (
-        error.message?.toLowerCase().includes('already registered') ||
-        error.message?.toLowerCase().includes('already been registered') ||
-        error.message?.toLowerCase().includes('user already registered')
+        msg.includes('already registered') ||
+        msg.includes('already been registered') ||
+        msg.includes('user already registered') ||
+        msg.includes('email address is already')
       ) {
         setError('This email address is already linked to an existing account. Please use a different email.')
       } else {
@@ -122,9 +174,11 @@ export default function SignUpPage() {
       }
       return
     }
+
     setSuccess(true)
   }
 
+  // ─── Success screen ─────────────────────────────────────────────────────────
   if (success) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
@@ -147,21 +201,29 @@ export default function SignUpPage() {
     )
   }
 
+  // ─── Main form ──────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-md">
+
+        {/* Header */}
         <div className="text-center mb-6">
           <div className="w-14 h-14 rounded-full border-2 overflow-hidden mx-auto mb-3" style={{ borderColor: 'var(--accent)' }}>
             <img src="/nacs-logo.jpeg" alt="NACS Logo" className="w-full h-full object-cover" />
           </div>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Join NACS FUTO</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Create your student account</p>
+
+          {/* Step indicator */}
           <div className="flex items-center justify-center gap-3 mt-4">
             {[1, 2].map((s, i) => (
               <div key={s} className="flex items-center gap-1.5">
-                {i > 0 && <div className="w-8 h-px" style={{ background: step >= s ? 'var(--accent)' : 'var(--border)' }} />}
+                {i > 0 && (
+                  <div className="w-8 h-px" style={{ background: step >= s ? 'var(--accent)' : 'var(--border)' }} />
+                )}
                 <div className="flex items-center gap-1.5" style={{ color: step >= s ? 'var(--accent)' : 'var(--text-muted)' }}>
-                  <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
+                  <div
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
                     style={{
                       background: step >= s ? 'var(--accent)' : 'transparent',
                       border: `1px solid ${step >= s ? 'var(--accent)' : 'var(--border)'}`,
@@ -177,6 +239,7 @@ export default function SignUpPage() {
         </div>
 
         <div className="glass-card p-5 sm:p-6">
+          {/* Error banner */}
           {error && (
             <div className="alert-error mb-4">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -184,21 +247,31 @@ export default function SignUpPage() {
             </div>
           )}
 
+          {/* ── STEP 1: Matric verification ── */}
           {step === 1 ? (
             <div>
               <h3 className="font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>Verify Your Identity</h3>
-              <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>Enter your FUTO matriculation number to get started</p>
+              <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
+                Enter your FUTO matriculation number to get started
+              </p>
               <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                 Matriculation Number <span style={{ color: '#ef4444' }}>*</span>
               </label>
               <div className="input-icon-wrap mb-4">
                 <User className="input-icon" />
-                <input className="cyber-input" placeholder="e.g., 20251234567"
-                  value={matric} onChange={e => setMatric(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && verifyMatric()} />
+                <input
+                  className="cyber-input"
+                  placeholder="e.g., 20251234567"
+                  value={matric}
+                  onChange={e => setMatric(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && verifyMatric()}
+                />
               </div>
               <button onClick={verifyMatric} disabled={loading} className="cyber-btn w-full">
-                {loading ? 'Verifying...' : <><span>Verify & Continue</span><ArrowRight className="w-4 h-4" /></>}
+                {loading
+                  ? 'Verifying...'
+                  : <><span>Verify & Continue</span><ArrowRight className="w-4 h-4" /></>
+                }
               </button>
               <div className="rounded-lg p-3 mt-4" style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-border)' }}>
                 <p className="text-xs font-semibold mb-1" style={{ color: 'var(--accent)' }}>Why do we need this?</p>
@@ -209,12 +282,15 @@ export default function SignUpPage() {
                 </ul>
               </div>
             </div>
+
           ) : (
+            /* ── STEP 2: Account details ── */
             <div>
               <h3 className="font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>Create Account</h3>
               <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
                 Matric: <span className="font-mono" style={{ color: 'var(--accent)' }}>{matric}</span> ✓
               </p>
+
               <div className="space-y-3">
 
                 {/* Full Name */}
@@ -224,42 +300,65 @@ export default function SignUpPage() {
                   </label>
                   <div className="input-icon-wrap">
                     <User className="input-icon" />
-                    <input className="cyber-input" type="text" placeholder="Your full name"
-                      value={name} onChange={e => setName(e.target.value)} />
+                    <input
+                      className="cyber-input"
+                      type="text"
+                      placeholder="Your full name"
+                      value={name}
+                      onChange={e => setName(e.target.value)}
+                    />
                   </div>
                 </div>
 
-                {/* Username — realtime check */}
+                {/* Username — live uniqueness check */}
                 <div>
                   <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                     Username <span style={{ color: '#ef4444' }}>*</span>
                   </label>
                   <div className="input-icon-wrap relative">
                     <AtSign className="input-icon" />
-                    <input className="cyber-input" type="text" placeholder="Choose a unique username"
+                    <input
+                      className="cyber-input"
+                      type="text"
+                      placeholder="Choose a unique username"
                       value={username}
                       onChange={e => checkUsername(e.target.value)}
                       style={{
                         paddingRight: '5rem',
-                        borderColor: usernameStatus === 'taken' ? '#ef4444'
+                        borderColor:
+                          usernameStatus === 'taken' ? '#ef4444'
                           : usernameStatus === 'available' ? '#10b981'
-                          : undefined
-                      }} />
+                          : undefined,
+                      }}
+                    />
                     {usernameLoading && (
                       <span className="absolute right-3 top-1/2 -translate-y-1/2">
-                        <div className="w-3.5 h-3.5 border-2 border-t-transparent rounded-full animate-spin"
-                          style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+                        <div
+                          className="w-3.5 h-3.5 border-2 rounded-full animate-spin"
+                          style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }}
+                        />
                       </span>
                     )}
                     {!usernameLoading && usernameStatus === 'available' && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold" style={{ color: '#10b981' }}>✓ Free</span>
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold" style={{ color: '#10b981' }}>
+                        ✓ Free
+                      </span>
                     )}
                     {!usernameLoading && usernameStatus === 'taken' && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold" style={{ color: '#ef4444' }}>✗ Taken</span>
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold" style={{ color: '#ef4444' }}>
+                        ✗ Taken
+                      </span>
                     )}
                   </div>
                   {usernameStatus === 'taken' && (
-                    <p className="text-xs mt-1" style={{ color: '#ef4444' }}>This username is already taken. Please choose a different one.</p>
+                    <p className="text-xs mt-1" style={{ color: '#ef4444' }}>
+                      This username is already taken. Please choose a different one.
+                    </p>
+                  )}
+                  {usernameStatus === 'available' && (
+                    <p className="text-xs mt-1" style={{ color: '#10b981' }}>
+                      Username is available!
+                    </p>
                   )}
                 </div>
 
@@ -270,25 +369,33 @@ export default function SignUpPage() {
                   </label>
                   <div className="input-icon-wrap">
                     <Mail className="input-icon" />
-                    <input className="cyber-input" type="email" placeholder="your.email@example.com"
-                      value={email} onChange={e => setEmail(e.target.value)} />
+                    <input
+                      className="cyber-input"
+                      type="email"
+                      placeholder="your.email@example.com"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                    />
                   </div>
                 </div>
 
-                {/* Password with show/hide */}
+                {/* Password */}
                 <div>
                   <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                     Password <span style={{ color: '#ef4444' }}>*</span>
                   </label>
                   <div className="input-icon-wrap relative">
                     <Lock className="input-icon" />
-                    <input className="cyber-input"
+                    <input
+                      className="cyber-input"
                       type={showPassword ? 'text' : 'password'}
                       placeholder="Create a password"
                       value={password}
                       onChange={e => setPassword(e.target.value)}
-                      style={{ paddingRight: '2.5rem' }} />
-                    <button type="button"
+                      style={{ paddingRight: '2.5rem' }}
+                    />
+                    <button
+                      type="button"
                       onClick={() => setShowPassword(v => !v)}
                       tabIndex={-1}
                       aria-label={showPassword ? 'Hide password' : 'Show password'}
@@ -298,20 +405,23 @@ export default function SignUpPage() {
                   </div>
                 </div>
 
-                {/* Confirm Password with show/hide */}
+                {/* Confirm Password */}
                 <div>
                   <label className="text-xs font-medium mb-1 block" style={{ color: 'var(--text-secondary)' }}>
                     Confirm Password <span style={{ color: '#ef4444' }}>*</span>
                   </label>
                   <div className="input-icon-wrap relative">
                     <Lock className="input-icon" />
-                    <input className="cyber-input"
+                    <input
+                      className="cyber-input"
                       type={showConfirm ? 'text' : 'password'}
                       placeholder="Confirm your password"
                       value={confirmPassword}
                       onChange={e => setConfirmPassword(e.target.value)}
-                      style={{ paddingRight: '2.5rem' }} />
-                    <button type="button"
+                      style={{ paddingRight: '2.5rem' }}
+                    />
+                    <button
+                      type="button"
                       onClick={() => setShowConfirm(v => !v)}
                       tabIndex={-1}
                       aria-label={showConfirm ? 'Hide password' : 'Show password'}
@@ -323,12 +433,15 @@ export default function SignUpPage() {
 
               </div>
 
-              <button onClick={handleSignUp}
+              <button
+                onClick={handleSignUp}
                 disabled={loading || usernameStatus === 'taken'}
                 className="cyber-btn w-full mt-4">
                 {loading ? 'Creating Account...' : 'Create Account'}
               </button>
-              <button onClick={() => { setStep(1); setError('') }}
+
+              <button
+                onClick={() => { setStep(1); setError('') }}
                 className="text-xs mt-2 hover:underline w-full text-center block"
                 style={{ color: 'var(--text-muted)' }}>
                 ← Back
@@ -341,7 +454,10 @@ export default function SignUpPage() {
             <Link to="/login" style={{ color: 'var(--accent)' }} className="hover:underline">Sign in here</Link>
           </p>
         </div>
-        <p className="text-center text-xs mt-3" style={{ color: 'var(--text-muted)' }}>🔒 Your information is encrypted and secure</p>
+
+        <p className="text-center text-xs mt-3" style={{ color: 'var(--text-muted)' }}>
+          🔒 Your information is encrypted and secure
+        </p>
       </div>
     </div>
   )
