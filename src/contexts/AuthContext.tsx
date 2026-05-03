@@ -47,9 +47,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [])
 
   const fetchProfile = async (userId: string) => {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single()
-    setProfile(data)
-    setLoading(false)
+    try {
+      // Read from `users` table first — it has open RLS (anyone can read)
+      // and no recursive policies, so it never causes a 500 error.
+      // We map `role === 'admin'` → `is_admin` so the rest of the app
+      // (AdminRoute in App.tsx) keeps working without any other changes.
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('id, name, matric_number, role')
+        .eq('id', userId)
+        .maybeSingle()
+
+      if (!userError && userData) {
+        setProfile({
+          id: userData.id,
+          matric_number: userData.matric_number ?? '',
+          name: userData.name,
+          is_admin: userData.role === 'admin',
+        })
+        setLoading(false)
+        return
+      }
+
+      // Fallback: try profiles table (also has open RLS now after SQL fix)
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('id, name, matric_number, is_admin')
+        .eq('id', userId)
+        .maybeSingle()
+
+      setProfile(profileData ?? null)
+    } catch (err) {
+      console.error('fetchProfile error:', err)
+      setProfile(null)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const signIn = async (email: string, password: string) => {
@@ -57,7 +90,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { error }
   }
 
-  const signUp = async (email: string, password: string, name: string, matricNumber: string, username?: string) => {
+  const signUp = async (
+    email: string,
+    password: string,
+    name: string,
+    matricNumber: string,
+    username?: string
+  ) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -65,22 +104,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     })
 
     if (!error && data.user) {
-      // Insert into profiles (only columns that exist in live DB)
       await supabase.from('profiles').insert({
         id: data.user.id,
         matric_number: matricNumber,
         name,
-        is_admin: false
+        is_admin: false,
       })
 
-      // Insert into users table (has email, username, matric_number already)
       await supabase.from('users').insert({
         id: data.user.id,
         email: email.trim().toLowerCase(),
         name,
         matric_number: matricNumber,
         username: username?.trim().toLowerCase() || null,
-        role: 'student'
+        role: 'student',
       })
     }
 
@@ -96,7 +133,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider value={{
       user, session, profile, loading,
       signIn, signUp, signOut,
-      isAdmin: profile?.is_admin === true
+      isAdmin: profile?.is_admin === true,
     }}>
       {children}
     </AuthContext.Provider>
