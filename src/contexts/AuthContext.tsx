@@ -48,10 +48,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const fetchProfile = async (userId: string) => {
     try {
-      // Read from `users` table first — it has open RLS (anyone can read)
-      // and no recursive policies, so it never causes a 500 error.
-      // We map `role === 'admin'` → `is_admin` so the rest of the app
-      // (AdminRoute in App.tsx) keeps working without any other changes.
+      // Read from `users` table first — no recursive RLS, never causes 500 errors.
+      // Map role === 'admin' → is_admin so AdminRoute in App.tsx keeps working.
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('id, name, matric_number, role')
@@ -69,7 +67,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return
       }
 
-      // Fallback: try profiles table (also has open RLS now after SQL fix)
+      // Fallback: try profiles table
       const { data: profileData } = await supabase
         .from('profiles')
         .select('id, name, matric_number, is_admin')
@@ -97,29 +95,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     matricNumber: string,
     username?: string
   ) => {
-    const { data, error } = await supabase.auth.signUp({
+    // The database trigger `handle_new_user` now automatically inserts into
+    // both `profiles` and `users` tables when a new auth user is created.
+    // No manual inserts needed here — removing them eliminates the 401 errors
+    // that occurred because the anon role lacked INSERT permission on those tables.
+    const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { name, matric_number: matricNumber, username } }
+      options: {
+        data: {
+          name,
+          matric_number: matricNumber,
+          username: username?.trim().toLowerCase() || null,
+        }
+      }
     })
-
-    if (!error && data.user) {
-      await supabase.from('profiles').insert({
-        id: data.user.id,
-        matric_number: matricNumber,
-        name,
-        is_admin: false,
-      })
-
-      await supabase.from('users').insert({
-        id: data.user.id,
-        email: email.trim().toLowerCase(),
-        name,
-        matric_number: matricNumber,
-        username: username?.trim().toLowerCase() || null,
-        role: 'student',
-      })
-    }
 
     return { error }
   }
