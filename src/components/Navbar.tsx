@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth, getDisplayName } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { LogOut, Settings, Sun, Moon, Menu, X } from 'lucide-react'
 
@@ -76,7 +76,7 @@ export default function Navbar() {
                     <span>Admin</span>
                   </Link>
                 )}
-                <span className="text-xs hidden md:block" style={{ color: 'var(--text-muted)' }}>{profile?.name}</span>
+                <span className="text-xs hidden md:block" style={{ color: 'var(--text-muted)' }}>{getDisplayName(profile)}</span>
                 <button onClick={handleSignOut} className="cyber-btn-ghost text-xs py-1.5 px-3">
                   <LogOut className="w-3.5 h-3.5" />
                 </button>
@@ -119,7 +119,7 @@ export default function Navbar() {
                       <Settings className="w-4 h-4 inline mr-2" />ADMIN DASHBOARD
                     </Link>
                   )}
-                  <div className="px-3 py-1 text-xs" style={{ color: 'var(--text-muted)' }}>Signed in as {profile?.name}</div>
+                  <div className="px-3 py-1 text-xs" style={{ color: 'var(--text-muted)' }}>Signed in as {getDisplayName(profile)}</div>
                   <button onClick={handleSignOut} className="block w-full text-left nav-link py-2.5 px-3">
                     <LogOut className="w-4 h-4 inline mr-2" />SIGN OUT
                   </button>
