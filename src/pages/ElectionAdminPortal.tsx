@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ArrowLeft, Plus, Trash2, Check, X, Users, Vote, BarChart2, Settings, ChevronRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth, getDisplayName } from '../contexts/AuthContext'
 
 interface Candidate { id: string; name: string; position: string; image_url?: string; status: string }
 interface ElectionSettings { election_open: boolean; results_visible: boolean; allow_changes: boolean }
@@ -126,7 +126,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
             Election <span style={{ color: '#1a9ef4' }}>Admin</span>
           </div>
           <div className="text-xs font-semibold px-2 py-1 rounded-lg" style={{ background: '#eff6ff', color: '#1a6fc4' }}>
-            {profile?.name?.split(' ')[0]}
+            {getDisplayName(profile)}
           </div>
         </div>
 
