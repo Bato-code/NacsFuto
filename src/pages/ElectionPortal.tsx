@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth, getDisplayName } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import ElectionVoting from './ElectionVoting'
 import ElectionAdminPortal from './ElectionAdminPortal'
@@ -494,7 +494,7 @@ export default function ElectionPortal() {
 
           {user && (
             <p className="text-center text-xs" style={{ color: '#94a3b8' }}>
-              Signed in as <span style={{ color: '#1a9ef4', fontWeight: 600 }}>{profile?.name}</span>
+              Signed in as <span style={{ color: '#1a9ef4', fontWeight: 600 }}>{getDisplayName(profile)}</span>
             </p>
           )}
         </div>
