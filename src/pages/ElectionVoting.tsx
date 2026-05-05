@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { ArrowLeft, CheckCircle, ChevronDown, ChevronUp, AlertCircle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth, getDisplayName } from '../contexts/AuthContext'
 
 interface Candidate { id: string; name: string; position: string; image_url?: string }
 interface VoteMap { [position: string]: string }
@@ -160,7 +160,7 @@ export default function ElectionVoting({ onBack, settings }: {
             </div>
           </div>
           <div className="text-xs font-medium" style={{ color: '#1a9ef4' }}>
-            {profile?.name?.split(' ')[0]}
+            {getDisplayName(profile)}
           </div>
         </div>
       </div>
