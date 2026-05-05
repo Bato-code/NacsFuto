@@ -7,7 +7,7 @@ import {
   CheckCircle, Menu, Vote, Crown
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth, getDisplayName } from '../contexts/AuthContext'
 import FileUploader from '../components/FileUploader'
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
               <div className="text-xs font-mono" style={{ color: 'var(--accent)' }}>FUTO</div>
             </div>
           </div>
-          <div className="mt-2 text-xs truncate" style={{ color: 'var(--text-muted)' }}>{profile?.name}</div>
+          <div className="mt-2 text-xs truncate" style={{ color: 'var(--text-muted)' }}>{getDisplayName(profile)}</div>
         </div>
 
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
@@ -188,7 +188,7 @@ function AdminFeed() {
     const media = mediaMode === 'embed' && embedUrl
       ? { embed_url: embedUrl }
       : mediaUrl ? { url: mediaUrl } : null
-    await supabase.from('posts').insert({ author_id: user?.id, author_name: profile?.name || 'Admin', content: newPost.trim(), media, likes: 0, approved: true, pending: false })
+    await supabase.from('posts').insert({ author_id: user?.id, author_name: getDisplayName(profile), content: newPost.trim(), media, likes: 0, approved: true, pending: false })
     setNewPost(''); setMediaUrl(''); setEmbedUrl(''); setPosting(false); fetchPosts()
   }
 
