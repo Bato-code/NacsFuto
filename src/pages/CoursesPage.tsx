@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Search, BookOpen, Plus, Star, Users, Clock, X, Play } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth, getDisplayName } from '../contexts/AuthContext'
 import { Link } from 'react-router-dom'
 import FileUploader from '../components/FileUploader'
 
@@ -98,7 +98,7 @@ export default function CoursesPage() {
     await supabase.from('courses').insert({
       title: form.title, category: form.category, level: form.level, duration: form.duration,
       description: form.description, instructor: form.instructor, type: form.type,
-      approved: false, author_id: user?.id, author_name: profile?.name, students: 0, media
+      approved: false, author_id: user?.id, author_name: getDisplayName(profile), students: 0, media
     })
     setSubmitting(false)
     setShowSubmit(false)
