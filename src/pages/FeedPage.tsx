@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Heart, MessageCircle, Share2, Trash2, Edit2, Check, X, Plus, Copy, ExternalLink } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth, getDisplayName } from '../contexts/AuthContext'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import FileUploader from '../components/FileUploader'
 
@@ -187,7 +187,7 @@ function PostCard({ post, currentUserId, isAdmin, onDelete, onLike, highlighted 
   const addComment = async () => {
     if (!newComment.trim() || !currentUserId) return
     setLoading(true)
-    await supabase.from('comments').insert({ post_id: post.id, author: profile?.name || 'User', author_id: currentUserId, content: newComment.trim() })
+    await supabase.from('comments').insert({ post_id: post.id, author: getDisplayName(profile), author_id: currentUserId, content: newComment.trim() })
     setNewComment(''); await fetchComments(); setLoading(false)
   }
 
@@ -363,7 +363,7 @@ function PostCard({ post, currentUserId, isAdmin, onDelete, onLike, highlighted 
             ))}
             {currentUserId ? (
               <div className="flex gap-2">
-                <Avatar name={profile?.name || 'U'} size={28} />
+                <Avatar name={getDisplayName(profile)} size={28} />
                 <div className="flex-1 flex gap-2">
                   <input className="cyber-input text-xs py-1.5 flex-1" placeholder="Write a comment..."
                     value={newComment} onChange={e => setNewComment(e.target.value)}
@@ -409,7 +409,7 @@ export default function FeedPage() {
       : mediaUrl ? { url: mediaUrl } : null
     await supabase.from('posts').insert({
       author_id: user.id,
-      author_name: profile?.name || 'Member',
+      author_name: getDisplayName(profile),
       content: newPostContent.trim(),
       media,
       likes: 0,
@@ -508,7 +508,7 @@ export default function FeedPage() {
             style={{ color: 'var(--text-muted)' }}>
             <div className="w-8 h-8 rounded-full border flex items-center justify-center text-xs font-bold"
               style={{ borderColor: 'var(--accent-border)', background: 'var(--accent-dim)', color: 'var(--accent)' }}>
-              {(profile?.name || 'U')[0].toUpperCase()}
+              {getDisplayName(profile)[0].toUpperCase()}
             </div>
             <span className="text-sm flex-1 py-2 px-3 rounded-lg" style={{ background: 'var(--input-bg)', border: '1px solid var(--border)' }}>
               Share something with NACS...
