@@ -6,7 +6,14 @@ interface Profile {
   id: string
   matric_number: string
   name: string
+  username: string | null
   is_admin: boolean | null
+}
+
+/** Returns @username if set, otherwise full name */
+export const getDisplayName = (profile: Profile | null): string => {
+  if (!profile) return 'User'
+  return profile.username ? `@${profile.username}` : profile.name
 }
 
 interface AuthContextType {
@@ -52,7 +59,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Map role === 'admin' → is_admin so AdminRoute in App.tsx keeps working.
       const { data: userData, error: userError } = await supabase
         .from('users')
-        .select('id, name, matric_number, role')
+        .select('id, name, matric_number, role, username')
         .eq('id', userId)
         .maybeSingle()
 
@@ -61,6 +68,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           id: userData.id,
           matric_number: userData.matric_number ?? '',
           name: userData.name,
+          username: userData.username ?? null,
           is_admin: userData.role === 'admin',
         })
         setLoading(false)
@@ -70,11 +78,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Fallback: try profiles table
       const { data: profileData } = await supabase
         .from('profiles')
-        .select('id, name, matric_number, is_admin')
+        .select('id, name, matric_number, is_admin, username')
         .eq('id', userId)
         .maybeSingle()
 
-      setProfile(profileData ?? null)
+      setProfile(profileData ? { ...profileData, username: profileData.username ?? null } : null)
     } catch (err) {
       console.error('fetchProfile error:', err)
       setProfile(null)
