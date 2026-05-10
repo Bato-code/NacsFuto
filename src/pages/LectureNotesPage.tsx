@@ -54,7 +54,21 @@ export default function LectureNotesPage() {
     if (!user) { navigate('/login'); return }
     setDownloadingId(note.id)
     await supabase.from('lecture_notes').update({ download_count: (note.download_count || 0) + 1 }).eq('id', note.id)
-    window.open(note.file_url, '_blank')
+    try {
+      const res = await fetch(note.file_url)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = note.file_name || note.title
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      // Fallback to new tab if fetch/CORS fails
+      window.open(note.file_url, '_blank')
+    }
     setNotes(prev => prev.map(n => n.id === note.id ? { ...n, download_count: (n.download_count || 0) + 1 } : n))
     setDownloadingId(null)
     setDownloadedId(note.id)
