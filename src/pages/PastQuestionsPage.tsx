@@ -85,7 +85,21 @@ export default function PastQuestionsPage() {
     setDownloadingId(material.id)
     await supabase.from('materials').update({ download_count: (material.download_count || 0) + 1 }).eq('id', material.id)
     await supabase.from('material_downloads').insert({ material_id: material.id, user_id: user.id })
-    window.open(material.file_url, '_blank')
+    try {
+      const res = await fetch(material.file_url)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = material.file_name || material.title
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      // Fallback to new tab if fetch/CORS fails
+      window.open(material.file_url, '_blank')
+    }
     setMaterials(prev => prev.map(m => m.id === material.id ? { ...m, download_count: (m.download_count || 0) + 1 } : m))
     setDownloadingId(null)
     setDownloadedId(material.id)
