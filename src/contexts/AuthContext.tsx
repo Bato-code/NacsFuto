@@ -6,7 +6,14 @@ interface Profile {
   id: string
   matric_number: string
   name: string
+  username: string | null
   is_admin: boolean | null
+}
+
+/** Returns @username if set, otherwise full name */
+export const getDisplayName = (profile: Profile | null): string => {
+  if (!profile) return 'User'
+  return profile.username ? `@${profile.username}` : profile.name
 }
 
 interface AuthContextType {
@@ -15,7 +22,7 @@ interface AuthContextType {
   profile: Profile | null
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error: any }>
-  signUp: (email: string, password: string, name: string, matricNumber: string) => Promise<{ error: any }>
+  signUp: (email: string, password: string, name: string, matricNumber: string, username?: string) => Promise<{ error: any }>
   signOut: () => Promise<void>
   isAdmin: boolean
 }
@@ -28,91 +35,90 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
 
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      setUser(session?.user ?? null)
+      if (session?.user) fetchProfile(session.user.id)
+      else setLoading(false)
+    })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+      setUser(session?.user ?? null)
+      if (session?.user) fetchProfile(session.user.id)
+      else { setProfile(null); setLoading(false) }
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
+
   const fetchProfile = async (userId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
+      // Read from `users` table first — no recursive RLS, never causes 500 errors.
+      // Map role === 'admin' → is_admin so AdminRoute in App.tsx keeps working.
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('id, name, matric_number, role, username')
         .eq('id', userId)
-        .single()
+        .maybeSingle()
 
-      if (error) {
-        console.error('[AuthContext] fetchProfile error:', error.message, error.code)
-        setProfile(null)
-      } else {
-        console.log('[AuthContext] profile loaded:', data)
-        setProfile(data)
+      if (!userError && userData) {
+        setProfile({
+          id: userData.id,
+          matric_number: userData.matric_number ?? '',
+          name: userData.name,
+          username: userData.username ?? null,
+          is_admin: userData.role === 'admin',
+        })
+        setLoading(false)
+        return
       }
+
+      // Fallback: try profiles table
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('id, name, matric_number, is_admin, username')
+        .eq('id', userId)
+        .maybeSingle()
+
+      setProfile(profileData ? { ...profileData, username: profileData.username ?? null } : null)
     } catch (err) {
-      console.error('[AuthContext] fetchProfile exception:', err)
+      console.error('fetchProfile error:', err)
       setProfile(null)
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => {
-    let mounted = true
-
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!mounted) return
-      setSession(session)
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        fetchProfile(session.user.id)
-      } else {
-        setLoading(false)
-      }
-    })
-
-    // Listen for auth changes (login, logout, token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!mounted) return
-      console.log('[AuthContext] auth state change:', _event, session?.user?.id)
-      setSession(session)
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        setLoading(true) // reset loading while we fetch the new profile
-        fetchProfile(session.user.id)
-      } else {
-        setProfile(null)
-        setLoading(false)
-      }
-    })
-
-    return () => {
-      mounted = false
-      subscription.unsubscribe()
-    }
-  }, [])
-
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     return { error }
   }
 
-  const signUp = async (email: string, password: string, name: string, matricNumber: string) => {
-    const { data, error } = await supabase.auth.signUp({
+  const signUp = async (
+    email: string,
+    password: string,
+    name: string,
+    matricNumber: string,
+    username?: string
+  ) => {
+    // The database trigger `handle_new_user` now automatically inserts into
+    // both `profiles` and `users` tables when a new auth user is created.
+    // No manual inserts needed here — removing them eliminates the 401 errors
+    // that occurred because the anon role lacked INSERT permission on those tables.
+    const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { name, matric_number: matricNumber } }
+      options: {
+        data: {
+          name,
+          matric_number: matricNumber,
+          username: username?.trim().toLowerCase() || null,
+        }
+      }
     })
-    if (!error && data.user) {
-      await supabase.from('profiles').insert({
-        id: data.user.id,
-        matric_number: matricNumber,
-        name,
-        is_admin: false
-      })
-      await supabase.from('users').insert({
-        id: data.user.id,
-        email,
-        name,
-        matric_number: matricNumber,
-        role: 'student'
-      })
-    }
+
     return { error }
   }
 
@@ -121,13 +127,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfile(null)
   }
 
-  console.log('[AuthContext] render — loading:', loading, '| user:', user?.id, '| is_admin:', profile?.is_admin)
-
   return (
     <AuthContext.Provider value={{
       user, session, profile, loading,
       signIn, signUp, signOut,
-      isAdmin: profile?.is_admin === true
+      isAdmin: profile?.is_admin === true,
     }}>
       {children}
     </AuthContext.Provider>
