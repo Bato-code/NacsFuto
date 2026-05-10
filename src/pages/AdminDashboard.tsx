@@ -4,7 +4,7 @@ import {
   LayoutDashboard, MessageSquare, BookOpen, FileText, Flag, Mail,
   LogOut, ChevronRight, Users, Check, X, Trash2, Eye,
   Upload, Edit2, Plus, Download,
-  CheckCircle, Menu, Vote, Crown
+  CheckCircle, AlertCircle, Menu, Vote, Crown
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -552,14 +552,32 @@ function AdminReports() {
 function AdminMessages() {
   const [messages, setMessages] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [actionError, setActionError] = useState('')
   useEffect(() => { fetchMessages() }, [])
   const fetchMessages = async () => { setLoading(true); const { data } = await supabase.from('contact_messages').select('*').order('created_at', { ascending: false }); setMessages(data || []); setLoading(false) }
-  const markRead = async (id: string) => { await supabase.from('contact_messages').update({ status: 'read' }).eq('id', id); fetchMessages() }
-  const deleteMsg = async (id: string) => { if (!confirm('Delete?')) return; await supabase.from('contact_messages').delete().eq('id', id); fetchMessages() }
+  const markRead = async (id: string) => {
+    setActionError('')
+    setMessages(prev => prev.map(m => m.id === id ? { ...m, status: 'read' } : m))
+    const { error } = await supabase.from('contact_messages').update({ status: 'read' }).eq('id', id)
+    if (error) { setActionError('Permission denied — apply the RLS fix SQL to your Supabase project.'); fetchMessages() }
+  }
+  const deleteMsg = async (id: string) => {
+    if (!confirm('Delete this message?')) return
+    setActionError('')
+    setMessages(prev => prev.filter(m => m.id !== id))
+    const { error } = await supabase.from('contact_messages').delete().eq('id', id)
+    if (error) { setActionError('Permission denied — apply the RLS fix SQL to your Supabase project.'); fetchMessages() }
+  }
 
   return (
     <div>
       <h2 className="text-xl font-bold mb-6" style={{ color: 'var(--text-primary)' }}>Contact Messages</h2>
+      {actionError && (
+        <div className="alert-error mb-4 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span className="text-sm">{actionError}</span>
+        </div>
+      )}
       {loading ? <div className="flex justify-center py-8"><div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} /></div> :
         messages.length === 0 ? <div className="text-center py-16" style={{ color: 'var(--text-muted)' }}>No messages yet.</div> : (
           <div className="space-y-3">
@@ -833,6 +851,7 @@ function AdminLeadership() {
   const [editingSlot, setEditingSlot] = useState<{ leader?: any; role: string; type: string; sort_order: number } | null>(null)
   const [form, setForm] = useState({ name: '', image_url: '' })
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   useEffect(() => { fetchLeaders() }, [])
   const fetchLeaders = async () => {
@@ -846,18 +865,24 @@ function AdminLeadership() {
   const openEdit = (slot: typeof DEPT_POSITIONS_ADMIN[0], leader?: any) => {
     setEditingSlot({ leader, role: slot.role, type: slot.type, sort_order: slot.sort_order })
     setForm({ name: leader?.name || '', image_url: leader?.image_url || '' })
+    setSaveError('')
   }
 
   const handleSave = async () => {
     if (!form.name) return
-    setSaving(true)
+    setSaving(true); setSaveError('')
     const payload = { name: form.name, image_url: form.image_url, role: editingSlot!.role, type: editingSlot!.type, sort_order: editingSlot!.sort_order }
+    let error: any = null
     if (editingSlot?.leader?.id) {
-      await supabase.from('leadership').update(payload).eq('id', editingSlot.leader.id)
+      const res = await supabase.from('leadership').update(payload).eq('id', editingSlot.leader.id)
+      error = res.error
     } else {
-      await supabase.from('leadership').insert(payload)
+      const res = await supabase.from('leadership').insert(payload)
+      error = res.error
     }
-    setSaving(false); setEditingSlot(null); fetchLeaders()
+    setSaving(false)
+    if (error) { setSaveError('Permission denied — apply the RLS fix SQL to your Supabase project.'); return }
+    setEditingSlot(null); fetchLeaders()
   }
 
   const handleDelete = async (id: string) => {
@@ -947,6 +972,12 @@ function AdminLeadership() {
               <button onClick={handleSave} disabled={saving} className="cyber-btn flex-1">{saving ? 'Saving...' : 'Save'}</button>
               <button onClick={() => setEditingSlot(null)} className="cyber-btn-ghost flex-1">Cancel</button>
             </div>
+            {saveError && (
+              <div className="alert-error mt-3 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span className="text-sm">{saveError}</span>
+              </div>
+            )}
           </div>
         </div>
       )}
