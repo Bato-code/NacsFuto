@@ -3,11 +3,11 @@ import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, MessageSquare, BookOpen, FileText, Flag, Mail,
   LogOut, ChevronRight, Users, Check, X, Trash2, Eye,
-  Upload, Edit2, Plus, Download, ToggleLeft, ToggleRight,
+  Upload, Edit2, Plus, Download,
   CheckCircle, Menu, Vote, Crown
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { useAuth, getDisplayName } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/AuthContext'
 import FileUploader from '../components/FileUploader'
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
               <div className="text-xs font-mono" style={{ color: 'var(--accent)' }}>FUTO</div>
             </div>
           </div>
-          <div className="mt-2 text-xs truncate" style={{ color: 'var(--text-muted)' }}>{getDisplayName(profile)}</div>
+          <div className="mt-2 text-xs truncate" style={{ color: 'var(--text-muted)' }}>{profile?.name}</div>
         </div>
 
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
@@ -188,7 +188,7 @@ function AdminFeed() {
     const media = mediaMode === 'embed' && embedUrl
       ? { embed_url: embedUrl }
       : mediaUrl ? { url: mediaUrl } : null
-    await supabase.from('posts').insert({ author_id: user?.id, author_name: getDisplayName(profile), content: newPost.trim(), media, likes: 0, approved: true, pending: false })
+    await supabase.from('posts').insert({ author_id: user?.id, author_name: profile?.name || 'Admin', content: newPost.trim(), media, likes: 0, approved: true, pending: false })
     setNewPost(''); setMediaUrl(''); setEmbedUrl(''); setPosting(false); fetchPosts()
   }
 
@@ -603,8 +603,6 @@ function AdminUsers() {
     await supabase.from('whitelisted_matric_numbers').insert({ matric_number: matric.trim(), is_active: true })
     setMatric(''); setAdding(false); alert('Matric number whitelisted!')
   }
-  const toggleAdmin = async (user: any) => { await supabase.from('profiles').update({ is_admin: !user.is_admin }).eq('id', user.id); fetchUsers() }
-
   return (
     <div>
       <h2 className="text-xl font-bold mb-6" style={{ color: 'var(--text-primary)' }}>Users & Whitelist</h2>
@@ -626,10 +624,6 @@ function AdminUsers() {
               </div>
               <div className="flex items-center gap-2">
                 {u.is_admin && <span className="badge-admin">ADMIN</span>}
-                <button onClick={() => toggleAdmin(u)} className="p-1.5 rounded-lg border transition-colors"
-                  style={{ borderColor: 'var(--border)', color: u.is_admin ? '#f59e0b' : 'var(--text-muted)' }}>
-                  {u.is_admin ? <ToggleRight className="w-4 h-4" /> : <ToggleLeft className="w-4 h-4" />}
-                </button>
               </div>
             </div>
           ))}
