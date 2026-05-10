@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
@@ -7,20 +7,40 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const redirectTo = searchParams.get('redirect') || '/'
-  const { signIn } = useAuth()
+  const { signIn, user, profile, loading: authLoading } = useAuth()
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [loginAttempted, setLoginAttempted] = useState(false)
+
+  // Watch for profile to finish loading after a login attempt, then redirect
+  useEffect(() => {
+    if (!loginAttempted) return   // only run after a login attempt
+    if (authLoading) return        // wait for profile to finish loading
+    if (!user) return              // auth failed, nothing to do
+
+    if (profile?.is_admin === true) {
+      navigate('/admin', { replace: true })
+    } else {
+      navigate(redirectTo, { replace: true })
+    }
+  }, [loginAttempted, authLoading, user, profile, navigate, redirectTo])
 
   const handleLogin = async () => {
     if (!email || !password) { setError('Please fill in all fields'); return }
-    setLoading(true); setError('')
+    setLoading(true)
+    setError('')
     const { error } = await signIn(email, password)
     setLoading(false)
-    if (error) { setError(error.message); return }
-    navigate(redirectTo)
+    if (error) {
+      setError(error.message)
+      return
+    }
+    // Signal the useEffect to start watching for profile + redirect
+    setLoginAttempted(true)
   }
 
   const comingFromElection = redirectTo === '/election'
@@ -88,9 +108,9 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <button onClick={handleLogin} disabled={loading} className="cyber-btn w-full mt-4">
+          <button onClick={handleLogin} disabled={loading || (loginAttempted && authLoading)} className="cyber-btn w-full mt-4">
             <Lock className="w-4 h-4" />
-            {loading ? 'Signing In...' : 'Sign In'}
+            {loading || (loginAttempted && authLoading) ? 'Signing In...' : 'Sign In'}
           </button>
 
           <div className="rounded-lg p-3 mt-4"
