@@ -400,13 +400,25 @@ function AdminPastQuestions() {
   const [editData, setEditData] = useState<any>({})
 
   useEffect(() => { fetchMaterials() }, [])
+  const [actionError, setActionError] = useState('')
   const fetchMaterials = async () => { setLoading(true); const { data } = await supabase.from('materials').select('*').order('created_at', { ascending: false }); setMaterials(data || []); setLoading(false) }
-  const saveEdit = async () => { await supabase.from('materials').update(editData).eq('id', editId); setEditId(null); fetchMaterials() }
-  const deleteMaterial = async (id: string) => { if (!confirm('Delete?')) return; await supabase.from('materials').delete().eq('id', id); fetchMaterials() }
+  const saveEdit = async () => {
+    const { error } = await supabase.from('materials').update(editData).eq('id', editId)
+    if (error) { setActionError(`Error: ${error.message} (code: ${error.code})`); return }
+    setEditId(null); fetchMaterials()
+  }
+  const deleteMaterial = async (id: string) => {
+    if (!confirm('Delete?')) return
+    setActionError('')
+    const { error } = await supabase.from('materials').delete().eq('id', id)
+    if (error) { setActionError(`Error: ${error.message} (code: ${error.code})`); return }
+    fetchMaterials()
+  }
 
   return (
     <div>
       <h2 className="text-xl font-bold mb-6" style={{ color: 'var(--text-primary)' }}>Past Questions</h2>
+      {actionError && <div className="alert-error mb-4 flex items-start gap-2"><AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /><span className="text-sm">{actionError}</span></div>}
       <UploadForm table="materials" onDone={fetchMaterials} />
       {loading ? <div className="flex justify-center py-8"><div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} /></div> : (
         <div className="space-y-3">
@@ -457,13 +469,25 @@ function AdminLectureNotes() {
   const [editData, setEditData] = useState<any>({})
 
   useEffect(() => { fetchNotes() }, [])
+  const [actionError, setActionError] = useState('')
   const fetchNotes = async () => { setLoading(true); const { data } = await supabase.from('lecture_notes').select('*').order('created_at', { ascending: false }); setNotes(data || []); setLoading(false) }
-  const saveEdit = async () => { await supabase.from('lecture_notes').update(editData).eq('id', editId); setEditId(null); fetchNotes() }
-  const deleteNote = async (id: string) => { if (!confirm('Delete?')) return; await supabase.from('lecture_notes').delete().eq('id', id); fetchNotes() }
+  const saveEdit = async () => {
+    const { error } = await supabase.from('lecture_notes').update(editData).eq('id', editId)
+    if (error) { setActionError(`Error: ${error.message} (code: ${error.code})`); return }
+    setEditId(null); fetchNotes()
+  }
+  const deleteNote = async (id: string) => {
+    if (!confirm('Delete?')) return
+    setActionError('')
+    const { error } = await supabase.from('lecture_notes').delete().eq('id', id)
+    if (error) { setActionError(`Error: ${error.message} (code: ${error.code})`); return }
+    fetchNotes()
+  }
 
   return (
     <div>
       <h2 className="text-xl font-bold mb-6" style={{ color: 'var(--text-primary)' }}>Lecture Notes</h2>
+      {actionError && <div className="alert-error mb-4 flex items-start gap-2"><AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /><span className="text-sm">{actionError}</span></div>}
       <UploadForm table="lecture_notes" onDone={fetchNotes} />
       {loading ? <div className="flex justify-center py-8"><div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} /></div> : (
         <div className="space-y-3">
@@ -559,14 +583,14 @@ function AdminMessages() {
     setActionError('')
     setMessages(prev => prev.map(m => m.id === id ? { ...m, status: 'read' } : m))
     const { error } = await supabase.from('contact_messages').update({ status: 'read' }).eq('id', id)
-    if (error) { setActionError('Permission denied — apply the RLS fix SQL to your Supabase project.'); fetchMessages() }
+    if (error) { setActionError(`Error: ${error.message} (code: ${error.code})`); fetchMessages() }
   }
   const deleteMsg = async (id: string) => {
     if (!confirm('Delete this message?')) return
     setActionError('')
     setMessages(prev => prev.filter(m => m.id !== id))
     const { error } = await supabase.from('contact_messages').delete().eq('id', id)
-    if (error) { setActionError('Permission denied — apply the RLS fix SQL to your Supabase project.'); fetchMessages() }
+    if (error) { setActionError(`Error: ${error.message} (code: ${error.code})`); fetchMessages() }
   }
 
   return (
@@ -881,7 +905,7 @@ function AdminLeadership() {
       error = res.error
     }
     setSaving(false)
-    if (error) { setSaveError('Permission denied — apply the RLS fix SQL to your Supabase project.'); return }
+    if (error) { setSaveError(`Error: ${error.message} (code: ${error.code})`); return }
     setEditingSlot(null); fetchLeaders()
   }
 
