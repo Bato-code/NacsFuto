@@ -1,24 +1,38 @@
-import { useState, useEffect } from 'react'
-import { ArrowLeft, CheckCircle, ChevronDown, ChevronUp, AlertCircle } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { ArrowLeft, CheckCircle, ChevronDown, ChevronUp, Lock, Ban } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth, getDisplayName } from '../contexts/AuthContext'
 
-interface Candidate { id: string; name: string; position: string; image_url?: string }
-interface VoteMap { [position: string]: string }
+interface Candidate { id: string; name: string; position: string; image_url?: string; status: string }
+interface VoteMap { [position: string]: Set<string> }
 
-function CandidateAvatar({ name, imageUrl, size = 48 }: { name: string; imageUrl?: string; size?: number }) {
+const POSITIONS = [
+  'President',
+  'Vice President',
+  'Secretary General',
+  'Financial Secretary',
+  'Assistant Secretary General',
+  'Treasurer',
+  'Director of Welfare',
+  'Director of ICT & Research',
+  'Director of Socials',
+  'Director of Protocol (PRO)',
+  'Director of Sports',
+]
+
+function CandidateAvatar({ name, imageUrl, size = 48, suspended = false }: { name: string; imageUrl?: string; size?: number; suspended?: boolean }) {
   const [err, setErr] = useState(false)
   const initials = (name || 'U').split(' ').filter(Boolean).slice(-2).map((n: string) => n[0]).join('').toUpperCase()
   const colors = ['#1a6fc4', '#0891b2', '#0369a1', '#1e40af', '#5b21b6']
-  const color = colors[(name || '').charCodeAt(0) % colors.length]
+  const color = suspended ? '#94a3b8' : colors[(name || '').charCodeAt(0) % colors.length]
   if (imageUrl && !err) {
     return <img src={imageUrl} alt={name} className="rounded-full object-cover shrink-0"
-      style={{ width: size, height: size }} onError={() => setErr(true)} />
+      style={{ width: size, height: size, filter: suspended ? 'grayscale(1)' : 'none' }} onError={() => setErr(true)} />
   }
   return (
     <div className="rounded-full flex items-center justify-center font-bold text-white shrink-0"
       style={{ width: size, height: size, background: color, fontSize: size * 0.33 }}>
-      {initials}
+      {suspended ? <Lock style={{ width: size * 0.38, height: size * 0.38 }} /> : initials}
     </div>
   )
 }
@@ -31,23 +45,51 @@ export default function ElectionVoting({ onBack, settings }: {
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [myVotes, setMyVotes] = useState<VoteMap>({})
   const [results, setResults] = useState<Record<string, number>>({})
+  const [totalVoters, setTotalVoters] = useState(0)
   const [hasSubmitted, setHasSubmitted] = useState(false)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
-  const [savingPosition, setSavingPosition] = useState<string | null>(null)
+  const [savingFor, setSavingFor] = useState<string | null>(null)
   const [openPositions, setOpenPositions] = useState<Record<string, boolean>>({})
   const [justSubmitted, setJustSubmitted] = useState(false)
+  const [animating, setAnimating] = useState<string | null>(null)
+  const realtimeRef = useRef<any>(null)
 
-  useEffect(() => { fetchAll() }, [])
+  useEffect(() => {
+    fetchAll()
+    return () => {
+      if (realtimeRef.current) supabase.removeChannel(realtimeRef.current)
+    }
+  }, [])
+
+  const setupRealtime = () => {
+    const channel = supabase
+      .channel('live-votes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'election_votes' }, () => { fetchLiveCounts() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'election_submissions' }, () => { fetchLiveCounts() })
+      .subscribe()
+    realtimeRef.current = channel
+  }
+
+  const fetchLiveCounts = async () => {
+    const [{ data: allVotes }, { data: subs }] = await Promise.all([
+      supabase.from('election_votes').select('candidate_id'),
+      supabase.from('election_submissions').select('id'),
+    ])
+    const r: Record<string, number> = {}
+    ;(allVotes || []).forEach((v: any) => { r[v.candidate_id] = (r[v.candidate_id] || 0) + 1 })
+    setResults(r)
+    setTotalVoters((subs || []).length)
+  }
 
   const fetchAll = async () => {
     setLoading(true)
-    const { data: cands } = await supabase.from('election_candidates').select('*').eq('status', 'active').order('position')
-    const list = cands || []
+    const { data: cands } = await supabase.from('election_candidates').select('*').order('created_at')
+    const list = (cands || []) as Candidate[]
     setCandidates(list)
-    const positions = [...new Set(list.map((c: Candidate) => c.position))]
+
     const openMap: Record<string, boolean> = {}
-    positions.forEach(p => { openMap[p] = true })
+    POSITIONS.forEach(p => { openMap[p] = true })
     setOpenPositions(openMap)
 
     if (user) {
@@ -56,58 +98,80 @@ export default function ElectionVoting({ onBack, settings }: {
         supabase.from('election_submissions').select('id').eq('voter_id', user.id).maybeSingle(),
       ])
       const voteMap: VoteMap = {}
-      ;(votes || []).forEach((v: any) => { voteMap[v.position] = v.candidate_id })
+      ;(votes || []).forEach((v: any) => {
+        if (!voteMap[v.position]) voteMap[v.position] = new Set()
+        voteMap[v.position].add(v.candidate_id)
+      })
       setMyVotes(voteMap)
       setHasSubmitted(!!submission)
     }
 
     if (settings.resultsVisible) {
-      const { data: allVotes } = await supabase.from('election_votes').select('candidate_id')
-      const r: Record<string, number> = {}
-      ;(allVotes || []).forEach((v: any) => { r[v.candidate_id] = (r[v.candidate_id] || 0) + 1 })
-      setResults(r)
+      await fetchLiveCounts()
+      setupRealtime()
     }
     setLoading(false)
   }
 
-  const castVote = async (position: string, candidateId: string) => {
+  const toggleVote = async (position: string, candidateId: string) => {
     if (!user || hasSubmitted) return
-    if (!settings.allowChanges && myVotes[position]) return
-    setSavingPosition(position)
-    if (myVotes[position]) {
-      await supabase.from('election_votes').update({ candidate_id: candidateId, voted_at: new Date().toISOString() }).eq('voter_id', user.id).eq('position', position)
+    const currentSet = myVotes[position] || new Set<string>()
+    const alreadyVoted = currentSet.has(candidateId)
+    if (!settings.allowChanges && currentSet.size > 0) return
+
+    setSavingFor(candidateId)
+    setAnimating(candidateId)
+    setTimeout(() => setAnimating(null), 600)
+
+    if (alreadyVoted) {
+      await supabase.from('election_votes').delete()
+        .eq('voter_id', user.id).eq('position', position).eq('candidate_id', candidateId)
+      setMyVotes(prev => {
+        const next = { ...prev }
+        const s = new Set(next[position] || [])
+        s.delete(candidateId)
+        if (s.size === 0) delete next[position]
+        else next[position] = s
+        return next
+      })
     } else {
       await supabase.from('election_votes').insert({ voter_id: user.id, position, candidate_id: candidateId })
+      setMyVotes(prev => {
+        const next = { ...prev }
+        const s = new Set(next[position] || [])
+        s.add(candidateId)
+        next[position] = s
+        return next
+      })
     }
-    setMyVotes(prev => ({ ...prev, [position]: candidateId }))
-    setSavingPosition(null)
+    setSavingFor(null)
   }
 
   const submitBallot = async () => {
     if (!user || hasSubmitted) return
-    const positions = [...new Set(candidates.map(c => c.position))]
-    const unvoted = positions.filter(p => !myVotes[p])
-    if (unvoted.length > 0) {
-      alert(`Please vote for all positions before submitting.\nMissing: ${unvoted.join(', ')}`)
-      return
-    }
     if (!confirm('Submit your ballot? This cannot be undone.')) return
     setSubmitting(true)
     await supabase.from('election_submissions').insert({ voter_id: user.id })
     setHasSubmitted(true)
     setJustSubmitted(true)
     setSubmitting(false)
-    if (settings.resultsVisible) {
-      const { data: allVotes } = await supabase.from('election_votes').select('candidate_id')
-      const r: Record<string, number> = {}
-      ;(allVotes || []).forEach((v: any) => { r[v.candidate_id] = (r[v.candidate_id] || 0) + 1 })
-      setResults(r)
-    }
+    await fetchLiveCounts()
   }
 
-  const positions = [...new Set(candidates.map(c => c.position))]
-  const totalForPosition = (pos: string) => candidates.filter(c => c.position === pos).reduce((s, c) => s + (results[c.id] || 0), 0)
-  const votedCount = Object.keys(myVotes).length
+  const candidatesForPosition = (position: string) => {
+    const pos = candidates.filter(c => c.position === position)
+    return [
+      ...pos.filter(c => c.status === 'active'),
+      ...pos.filter(c => c.status === 'suspended'),
+      ...pos.filter(c => c.status === 'disqualified'),
+    ]
+  }
+
+  const totalForPosition = (pos: string) =>
+    candidates.filter(c => c.position === pos && c.status === 'active').reduce((s, c) => s + (results[c.id] || 0), 0)
+
+  const positionsWithCandidates = POSITIONS.filter(p => candidates.some(c => c.position === p))
+  const totalVotedPositions = Object.keys(myVotes).filter(p => myVotes[p].size > 0).length
 
   if (loading) {
     return (
@@ -134,8 +198,7 @@ export default function ElectionVoting({ onBack, settings }: {
             Your vote has been recorded securely. Thank you for participating in the NACSFUTO elections.
           </p>
           {settings.resultsVisible && (
-            <button onClick={() => setJustSubmitted(false)}
-              className="election-cta-btn mb-3">View Live Results</button>
+            <button onClick={() => setJustSubmitted(false)} className="election-cta-btn mb-3">View Live Count</button>
           )}
           <button onClick={onBack} className="w-full py-3 rounded-xl text-sm font-medium transition-colors"
             style={{ background: '#f1f5f9', color: '#475569' }}>
@@ -148,6 +211,22 @@ export default function ElectionVoting({ onBack, settings }: {
 
   return (
     <div className="election-portal-bg min-h-screen">
+      <style>{`
+        @keyframes vote-pulse {
+          0% { transform: scale(1); }
+          40% { transform: scale(1.04); box-shadow: 0 0 0 6px rgba(26,158,244,0.18); }
+          100% { transform: scale(1); box-shadow: none; }
+        }
+        .vote-animate { animation: vote-pulse 0.55s ease; }
+        @keyframes checkbox-pop {
+          0% { transform: scale(0.7); opacity: 0.5; }
+          60% { transform: scale(1.2); }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        .checkbox-pop { animation: checkbox-pop 0.3s ease; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
+
       {/* Top bar */}
       <div className="sticky top-0 z-10" style={{ background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #e8eef6' }}>
         <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between">
@@ -166,7 +245,33 @@ export default function ElectionVoting({ onBack, settings }: {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 py-6">
-        {/* Already submitted banner */}
+
+        {/* Live stats bar */}
+        {settings.resultsVisible && (
+          <div className="rounded-2xl p-4 mb-5 flex items-center justify-between gap-4"
+            style={{ background: 'linear-gradient(135deg, #eff6ff, #dbeafe)', border: '1px solid #bfdbfe' }}>
+            <div className="text-center flex-1">
+              <div className="text-2xl font-bold" style={{ color: '#1a6fc4' }}>{totalVoters}</div>
+              <div className="text-xs font-semibold mt-0.5" style={{ color: '#3b82f6' }}>TOTAL VOTERS</div>
+            </div>
+            <div className="w-px h-10" style={{ background: '#bfdbfe' }} />
+            <div className="text-center flex-1">
+              <div className="text-2xl font-bold" style={{ color: '#1a6fc4' }}>
+                {Object.values(results).reduce((a, b) => a + b, 0)}
+              </div>
+              <div className="text-xs font-semibold mt-0.5" style={{ color: '#3b82f6' }}>VOTES CAST</div>
+            </div>
+            <div className="w-px h-10" style={{ background: '#bfdbfe' }} />
+            <div className="flex-1 text-center">
+              <span className="text-xs font-semibold px-2 py-1 rounded-full animate-pulse"
+                style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}>
+                🔴 Live
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Already submitted */}
         {hasSubmitted && !justSubmitted && (
           <div className="rounded-2xl p-4 mb-6 flex items-center gap-3"
             style={{ background: 'linear-gradient(135deg, #d1fae5, #a7f3d0)', border: '1px solid #6ee7b7' }}>
@@ -174,7 +279,7 @@ export default function ElectionVoting({ onBack, settings }: {
             <div>
               <p className="text-sm font-bold" style={{ color: '#065f46' }}>Ballot Already Submitted</p>
               <p className="text-xs" style={{ color: '#047857' }}>
-                {settings.resultsVisible ? 'Results are shown below.' : 'Results will be revealed when announced.'}
+                {settings.resultsVisible ? 'Live vote count is shown below.' : 'Results will be revealed when announced.'}
               </p>
             </div>
           </div>
@@ -190,44 +295,60 @@ export default function ElectionVoting({ onBack, settings }: {
           </div>
         )}
 
-        {/* Progress */}
-        {settings.electionOpen && !hasSubmitted && positions.length > 0 && (
+        {/* Voting progress */}
+        {settings.electionOpen && !hasSubmitted && positionsWithCandidates.length > 0 && (
           <div className="rounded-2xl p-4 mb-5" style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-semibold" style={{ color: '#0f172a' }}>Your Progress</span>
-              <span className="text-sm font-bold" style={{ color: '#1a9ef4' }}>{votedCount}/{positions.length} positions</span>
+              <span className="text-sm font-semibold" style={{ color: '#0f172a' }}>Your Ballot</span>
+              <span className="text-sm font-bold" style={{ color: '#1a9ef4' }}>
+                {totalVotedPositions}/{positionsWithCandidates.length} positions voted
+              </span>
             </div>
-            <div className="w-full h-2.5 rounded-full" style={{ background: '#e8eef6' }}>
-              <div className="h-2.5 rounded-full transition-all duration-500"
-                style={{ background: 'linear-gradient(90deg, #1a9ef4, #1a6fc4)', width: `${positions.length > 0 ? (votedCount / positions.length) * 100 : 0}%` }} />
+            <div className="w-full h-2 rounded-full" style={{ background: '#e8eef6' }}>
+              <div className="h-2 rounded-full transition-all duration-500"
+                style={{ background: 'linear-gradient(90deg, #1a9ef4, #1a6fc4)', width: `${positionsWithCandidates.length > 0 ? (totalVotedPositions / positionsWithCandidates.length) * 100 : 0}%` }} />
             </div>
+            <p className="text-xs mt-2" style={{ color: '#94a3b8' }}>
+              ✅ You may vote for <strong>any number of candidates</strong> in each position, or skip positions.
+            </p>
           </div>
         )}
 
         {/* Positions */}
-        <div className="space-y-3 mb-6">
-          {positions.map((position, posIdx) => {
-            const posCandidates = candidates.filter(c => c.position === position)
-            const myVote = myVotes[position]
+        <div className="space-y-4 mb-6">
+          {POSITIONS.map((position, posIdx) => {
+            const posCandidates = candidatesForPosition(position)
+            if (posCandidates.length === 0) return null
+
+            const myVoteSet = myVotes[position] || new Set<string>()
             const total = totalForPosition(position)
             const isOpen = openPositions[position] !== false
-            const canVote = settings.electionOpen && !hasSubmitted && (settings.allowChanges || !myVote)
+            const canVote = settings.electionOpen && !hasSubmitted
+            const activeCands = posCandidates.filter(c => c.status === 'active')
+            const suspendedCands = posCandidates.filter(c => c.status === 'suspended')
+            const disqualifiedCands = posCandidates.filter(c => c.status === 'disqualified')
 
             return (
               <div key={position} className="rounded-2xl overflow-hidden"
-                style={{ background: '#fff', border: `2px solid ${myVote ? '#bfdbfe' : '#e8eef6'}`, boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+                style={{
+                  background: '#fff',
+                  border: `2px solid ${myVoteSet.size > 0 ? '#bfdbfe' : '#e8eef6'}`,
+                  boxShadow: '0 2px 12px rgba(0,0,0,0.06)'
+                }}>
+
                 <button className="w-full flex items-center justify-between p-4"
                   onClick={() => setOpenPositions(prev => ({ ...prev, [position]: !isOpen }))}>
                   <div className="flex items-center gap-3 text-left">
                     <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
-                      style={{ background: myVote ? 'linear-gradient(135deg, #1a9ef4, #1a6fc4)' : '#cbd5e1' }}>
-                      {myVote ? <CheckCircle className="w-4 h-4" /> : posIdx + 1}
+                      style={{ background: myVoteSet.size > 0 ? 'linear-gradient(135deg, #1a9ef4, #1a6fc4)' : '#cbd5e1' }}>
+                      {myVoteSet.size > 0 ? <CheckCircle className="w-4 h-4" /> : posIdx + 1}
                     </div>
                     <div>
                       <div className="font-bold text-sm" style={{ color: '#0f172a' }}>{position}</div>
-                      <div className="text-xs" style={{ color: '#94a3b8' }}>
-                        {posCandidates.length} candidate{posCandidates.length !== 1 ? 's' : ''}
-                        {settings.resultsVisible && ` · ${total} votes`}
+                      <div className="text-xs flex items-center gap-2 flex-wrap" style={{ color: '#94a3b8' }}>
+                        <span>{activeCands.length} candidate{activeCands.length !== 1 ? 's' : ''}</span>
+                        {myVoteSet.size > 0 && <span className="font-semibold" style={{ color: '#1a9ef4' }}>· {myVoteSet.size} selected</span>}
+                        {settings.resultsVisible && <span style={{ color: '#10b981', fontWeight: 600 }}>· {total} votes</span>}
                       </div>
                     </div>
                   </div>
@@ -235,57 +356,132 @@ export default function ElectionVoting({ onBack, settings }: {
                     : <ChevronDown className="w-4 h-4 shrink-0" style={{ color: '#94a3b8' }} />}
                 </button>
 
+                <div className="mx-4 mb-2 flex items-center gap-2" style={{ borderTop: '1px solid #f1f5f9', paddingTop: 8 }}>
+                  <div className="text-xs font-bold tracking-widest uppercase" style={{ color: '#1a9ef4', letterSpacing: 1 }}>{position}</div>
+                  <div className="flex-1 h-px" style={{ background: '#e8eef6' }} />
+                  {myVoteSet.size === 0 && canVote && <span className="text-xs" style={{ color: '#cbd5e1' }}>Optional</span>}
+                </div>
+
                 {isOpen && (
-                  <div className="px-4 pb-4 space-y-2" style={{ borderTop: '1px solid #f1f5f9' }}>
-                    {savingPosition === position && (
-                      <div className="flex items-center gap-2 py-2 text-xs" style={{ color: '#1a9ef4' }}>
-                        <div className="w-3 h-3 rounded-full border border-t-transparent animate-spin"
-                          style={{ borderColor: '#1a9ef4', borderTopColor: 'transparent' }} />
-                        Saving...
-                      </div>
-                    )}
-                    <div className="pt-3 grid grid-cols-1 gap-2">
-                      {posCandidates.map(candidate => {
-                        const isSelected = myVote === candidate.id
+                  <div className="px-4 pb-4">
+
+                    {/* Active candidates */}
+                    <div className="space-y-2">
+                      {activeCands.map(candidate => {
+                        const isSelected = myVoteSet.has(candidate.id)
                         const count = results[candidate.id] || 0
                         const pct = total > 0 ? Math.round((count / total) * 100) : 0
-                        const isLeading = settings.resultsVisible && posCandidates.indexOf(candidate) === [...posCandidates].sort((a, b) => (results[b.id] || 0) - (results[a.id] || 0)).indexOf(candidate) && count > 0 && count === Math.max(...posCandidates.map(c => results[c.id] || 0))
+                        const isAnimating = animating === candidate.id
+                        const isSaving = savingFor === candidate.id
 
                         return (
-                          <button key={candidate.id}
-                            onClick={() => canVote && castVote(position, candidate.id)}
-                            disabled={!canVote}
-                            className="w-full text-left rounded-xl p-3 transition-all"
+                          <div key={candidate.id}
+                            onClick={() => canVote && toggleVote(position, candidate.id)}
+                            className={isAnimating ? 'vote-animate' : ''}
                             style={{
                               background: isSelected ? 'linear-gradient(135deg, #eff6ff, #dbeafe)' : '#f8fafc',
                               border: `2px solid ${isSelected ? '#1a9ef4' : '#e8eef6'}`,
+                              borderRadius: 14, padding: '12px 14px',
                               cursor: canVote ? 'pointer' : 'default',
-                              transform: isSelected ? 'scale(1.01)' : 'scale(1)',
+                              transition: 'border-color 0.2s, background 0.2s',
+                              userSelect: 'none',
                             }}>
                             <div className="flex items-center gap-3">
+                              <div className={isSelected ? 'checkbox-pop' : ''}
+                                style={{
+                                  width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                                  background: isSelected ? '#1a9ef4' : '#fff',
+                                  border: `2px solid ${isSelected ? '#1a9ef4' : '#cbd5e1'}`,
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  transition: 'background 0.2s, border-color 0.2s',
+                                }}>
+                                {isSaving ? (
+                                  <div style={{ width: 10, height: 10, border: '2px solid #fff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.6s linear infinite' }} />
+                                ) : isSelected ? (
+                                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                    <path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                  </svg>
+                                ) : null}
+                              </div>
                               <CandidateAvatar name={candidate.name} imageUrl={candidate.image_url} size={40} />
                               <div className="flex-1 min-w-0">
                                 <div className="font-semibold text-sm leading-tight" style={{ color: '#0f172a' }}>{candidate.name}</div>
-                                {isLeading && <span className="text-xs font-medium" style={{ color: '#f59e0b' }}>👑 Leading</span>}
+                                {settings.resultsVisible && (
+                                  <div className="text-xs mt-0.5 font-medium" style={{ color: '#64748b' }}>
+                                    {count} vote{count !== 1 ? 's' : ''} · {pct}%
+                                  </div>
+                                )}
                               </div>
-                              {isSelected && <CheckCircle className="w-5 h-5 shrink-0" style={{ color: '#1a9ef4' }} />}
+                              {isSelected && !isSaving && <CheckCircle className="w-5 h-5 shrink-0" style={{ color: '#1a9ef4' }} />}
                             </div>
                             {settings.resultsVisible && (
-                              <div className="mt-2.5">
-                                <div className="flex justify-between text-xs mb-1" style={{ color: '#94a3b8' }}>
-                                  <span>{count} vote{count !== 1 ? 's' : ''}</span>
-                                  <span className="font-bold" style={{ color: isSelected ? '#1a9ef4' : '#64748b' }}>{pct}%</span>
-                                </div>
+                              <div className="mt-2.5 ml-8">
                                 <div className="w-full h-1.5 rounded-full" style={{ background: '#e8eef6' }}>
                                   <div className="h-1.5 rounded-full transition-all duration-700"
                                     style={{ width: `${pct}%`, background: isSelected ? 'linear-gradient(90deg,#1a9ef4,#1a6fc4)' : '#94a3b8' }} />
                                 </div>
                               </div>
                             )}
-                          </button>
+                          </div>
                         )
                       })}
                     </div>
+
+                    {/* Suspended */}
+                    {suspendedCands.length > 0 && (
+                      <div className="mt-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="h-px flex-1" style={{ background: '#fee2e2' }} />
+                          <span className="text-xs font-semibold" style={{ color: '#ef4444' }}>🚫 Suspended</span>
+                          <div className="h-px flex-1" style={{ background: '#fee2e2' }} />
+                        </div>
+                        <div className="space-y-2">
+                          {suspendedCands.map(candidate => (
+                            <div key={candidate.id}
+                              style={{ background: '#fff5f5', border: '2px solid #fecaca', borderRadius: 14, padding: '10px 14px', opacity: 0.75, cursor: 'not-allowed' }}>
+                              <div className="flex items-center gap-3">
+                                <div style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0, background: '#fee2e2', border: '2px solid #fca5a5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <Lock style={{ width: 11, height: 11, color: '#ef4444' }} />
+                                </div>
+                                <CandidateAvatar name={candidate.name} imageUrl={candidate.image_url} size={38} suspended />
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-semibold text-sm leading-tight" style={{ color: '#94a3b8' }}>{candidate.name}</div>
+                                  <div className="text-xs" style={{ color: '#ef4444', fontWeight: 600 }}>Suspended — not eligible for votes</div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Disqualified */}
+                    {disqualifiedCands.length > 0 && (
+                      <div className="mt-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="h-px flex-1" style={{ background: '#fde68a' }} />
+                          <span className="text-xs font-semibold" style={{ color: '#d97706' }}>❌ Disqualified</span>
+                          <div className="h-px flex-1" style={{ background: '#fde68a' }} />
+                        </div>
+                        <div className="space-y-2">
+                          {disqualifiedCands.map(candidate => (
+                            <div key={candidate.id}
+                              style={{ background: '#fffbeb', border: '2px solid #fde68a', borderRadius: 14, padding: '10px 14px', opacity: 0.65, cursor: 'not-allowed' }}>
+                              <div className="flex items-center gap-3">
+                                <div style={{ width: 22, height: 22, borderRadius: 6, flexShrink: 0, background: '#fef3c7', border: '2px solid #fde68a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <Ban style={{ width: 11, height: 11, color: '#d97706' }} />
+                                </div>
+                                <CandidateAvatar name={candidate.name} imageUrl={candidate.image_url} size={38} suspended />
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-semibold text-sm leading-tight" style={{ color: '#94a3b8' }}>{candidate.name}</div>
+                                  <div className="text-xs" style={{ color: '#d97706', fontWeight: 600 }}>Disqualified — votes not counted</div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -294,19 +490,17 @@ export default function ElectionVoting({ onBack, settings }: {
         </div>
 
         {/* Submit */}
-        {settings.electionOpen && !hasSubmitted && positions.length > 0 && (
+        {settings.electionOpen && !hasSubmitted && positionsWithCandidates.length > 0 && (
           <div className="rounded-2xl p-5" style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
-            {votedCount < positions.length && (
-              <div className="flex items-start gap-2 rounded-xl p-3 mb-4 text-sm"
-                style={{ background: '#fef3c7', border: '1px solid #fde68a', color: '#92400e' }}>
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>You still need to vote for {positions.length - votedCount} more position{positions.length - votedCount !== 1 ? 's' : ''}.</span>
-              </div>
-            )}
-            <button onClick={submitBallot}
-              disabled={submitting || votedCount < positions.length}
-              className="election-cta-btn"
-              style={{ opacity: votedCount < positions.length ? 0.5 : 1 }}>
+            <div className="flex items-start gap-2 rounded-xl p-3 mb-4 text-sm"
+              style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af' }}>
+              <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: '#1a9ef4' }} />
+              <span>
+                You've voted in <strong>{totalVotedPositions}</strong> of <strong>{positionsWithCandidates.length}</strong> positions.
+                You can skip any position — voting is optional per position.
+              </span>
+            </div>
+            <button onClick={submitBallot} disabled={submitting} className="election-cta-btn">
               <CheckCircle className="w-5 h-5 inline mr-2" />
               {submitting ? 'Submitting...' : 'Submit Ballot'}
             </button>
