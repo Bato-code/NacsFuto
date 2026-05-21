@@ -122,30 +122,32 @@ export default function ElectionVoting({ onBack, settings }: {
     if (!user || hasSubmitted) return
     const currentSet = myVotes[position] || new Set<string>()
     const alreadyVoted = currentSet.has(candidateId)
-    if (!settings.allowChanges && currentSet.size > 0) return
+    const hasExistingVote = currentSet.size > 0
+    if (!settings.allowChanges && hasExistingVote && !alreadyVoted) return
 
     setSavingFor(candidateId)
     setAnimating(candidateId)
     setTimeout(() => setAnimating(null), 600)
 
     if (alreadyVoted) {
+      // Deselect: remove this candidate's vote
       await supabase.from('election_votes').delete()
         .eq('voter_id', user.id).eq('position', position).eq('candidate_id', candidateId)
       setMyVotes(prev => {
         const next = { ...prev }
-        const s = new Set(next[position] || [])
-        s.delete(candidateId)
-        if (s.size === 0) delete next[position]
-        else next[position] = s
+        delete next[position]
         return next
       })
     } else {
+      // Select: remove any existing vote for this position first, then insert new one
+      if (hasExistingVote) {
+        await supabase.from('election_votes').delete()
+          .eq('voter_id', user.id).eq('position', position)
+      }
       await supabase.from('election_votes').insert({ voter_id: user.id, position, candidate_id: candidateId })
       setMyVotes(prev => {
         const next = { ...prev }
-        const s = new Set(next[position] || [])
-        s.add(candidateId)
-        next[position] = s
+        next[position] = new Set([candidateId])
         return next
       })
     }
@@ -314,7 +316,7 @@ export default function ElectionVoting({ onBack, settings }: {
                 style={{ background: 'linear-gradient(90deg, #1a9ef4, #1a6fc4)', width: `${positionsWithCandidates.length > 0 ? (totalVotedPositions / positionsWithCandidates.length) * 100 : 0}%` }} />
             </div>
             <p className="text-xs mt-2" style={{ color: '#94a3b8' }}>
-              ✅ You may vote for <strong>any number of candidates</strong> in each position, or skip positions.
+              ✅ Select <strong>one candidate</strong> per position, or skip any position.
             </p>
           </div>
         )}
@@ -352,7 +354,7 @@ export default function ElectionVoting({ onBack, settings }: {
                       <div className="font-bold text-sm" style={{ color: '#0f172a' }}>{position}</div>
                       <div className="text-xs flex items-center gap-2 flex-wrap" style={{ color: '#94a3b8' }}>
                         <span>{activeCands.length} candidate{activeCands.length !== 1 ? 's' : ''}</span>
-                        {myVoteSet.size > 0 && <span className="font-semibold" style={{ color: '#1a9ef4' }}>· {myVoteSet.size} selected</span>}
+                        {myVoteSet.size > 0 && <span className="font-semibold" style={{ color: '#1a9ef4' }}>· 1 selected</span>}
                         {showLiveCount && <span style={{ color: '#10b981', fontWeight: 600 }}>· {total} votes</span>}
                       </div>
                     </div>
@@ -423,7 +425,7 @@ export default function ElectionVoting({ onBack, settings }: {
                               <div className="mt-2.5 ml-8">
                                 <div className="w-full h-1.5 rounded-full" style={{ background: '#e8eef6' }}>
                                   <div className="h-1.5 rounded-full transition-all duration-700"
-                                    style={{ width: `${pct}%`, background: isSelected ? 'linear-gradient(90deg,#1a9ef4,#1a6fc4)' : '#94a3b8' }} />
+                                    style={{ width: `${pct}%`, background: 'linear-gradient(90deg,#1a9ef4,#1a6fc4)' }} />
                                 </div>
                               </div>
                             )}
