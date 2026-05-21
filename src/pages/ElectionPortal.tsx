@@ -13,6 +13,7 @@ interface Stats {
   electionOpen: boolean
   resultsVisible: boolean
   allowChanges: boolean
+  liveCountVisible: boolean
 }
 
 interface Candidate {
@@ -351,7 +352,7 @@ export default function ElectionPortal() {
   const navigate = useNavigate()
   const [stats, setStats] = useState<Stats>({
     candidates: 0, positions: 0, status: 'Closed',
-    electionOpen: false, resultsVisible: false, allowChanges: true
+    electionOpen: false, resultsVisible: false, allowChanges: true, liveCountVisible: false
   })
   const [loadingStats, setLoadingStats] = useState(true)
   const [view, setView] = useState<'landing' | 'voting' | 'admin' | 'results'>('landing')
@@ -372,6 +373,7 @@ export default function ElectionPortal() {
       electionOpen: settings?.election_open || false,
       resultsVisible: settings?.results_visible || false,
       allowChanges: settings?.allow_changes ?? true,
+      liveCountVisible: settings?.live_count_visible || false,
     })
     setLoadingStats(false)
   }
