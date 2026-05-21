@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { ArrowLeft, Trash2, Check, X, Users, Vote, BarChart2, Settings, Camera, Save } from 'lucide-react'
+import { ArrowLeft, Trash2, Check, X, Users, Vote, BarChart2, Settings, Camera, Save, AlertTriangle, Lock, Ban } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth, getDisplayName } from '../contexts/AuthContext'
 
-interface Candidate { id: string; name: string; position: string; image_url?: string; status: string }
+interface Candidate { id: string; name: string; position: string; image_url?: string; status: string; sort_order?: number }
 interface ElectionSettings { election_open: boolean; results_visible: boolean; allow_changes: boolean }
 
-type AdminView = 'overview' | 'candidates' | 'results' | 'settings'
+type AdminView = 'overview' | 'candidates' | 'results' | 'final' | 'settings'
 
 const POSITIONS = [
   'President',
@@ -61,7 +61,6 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
   const [loading, setLoading] = useState(true)
   const [savingSettings, setSavingSettings] = useState(false)
 
-  // Draft state: one candidate slot per position
   const [drafts, setDrafts] = useState<Record<string, { name: string; image_url: string; imagePreview: string | null; uploading: boolean; saving: boolean }>>(
     () => Object.fromEntries(POSITIONS.map(p => [p, { name: '', image_url: '', imagePreview: null, uploading: false, saving: false }]))
   )
@@ -73,7 +72,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
     setLoading(true)
     const [{ data: s }, { data: c }, { data: v }, { data: sub }] = await Promise.all([
       supabase.from('election_settings').select('*').eq('id', 1).single(),
-      supabase.from('election_candidates').select('*').order('position'),
+      supabase.from('election_candidates').select('*').order('created_at'),
       supabase.from('election_votes').select('*'),
       supabase.from('election_submissions').select('*'),
     ])
@@ -130,10 +129,24 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
     fetchAll()
   }
 
-  const toggleStatus = async (id: string, status: string) => {
-    const newStatus = status === 'active' ? 'inactive' : 'active'
+  const cycleStatus = async (id: string, status: string) => {
+    let newStatus: string
+    if (status === 'active') newStatus = 'suspended'
+    else if (status === 'suspended') newStatus = 'active'
+    else newStatus = 'active'
     await supabase.from('election_candidates').update({ status: newStatus }).eq('id', id)
     setCandidates(prev => prev.map(c => c.id === id ? { ...c, status: newStatus } : c))
+  }
+
+  const disqualifyCandidate = async (id: string, currentStatus: string) => {
+    if (currentStatus === 'disqualified') {
+      await supabase.from('election_candidates').update({ status: 'active' }).eq('id', id)
+      setCandidates(prev => prev.map(c => c.id === id ? { ...c, status: 'active' } : c))
+      return
+    }
+    if (!confirm('Disqualify this candidate? They will be removed from voting and their votes will not count.')) return
+    await supabase.from('election_candidates').update({ status: 'disqualified' }).eq('id', id)
+    setCandidates(prev => prev.map(c => c.id === id ? { ...c, status: 'disqualified' } : c))
   }
 
   const deleteCandidate = async (id: string) => {
@@ -151,19 +164,35 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
   }
 
   const activeCandidates = candidates.filter(c => c.status === 'active')
+  const suspendedCandidates = candidates.filter(c => c.status === 'suspended')
+  const disqualifiedCandidates = candidates.filter(c => c.status === 'disqualified')
   const voteCountFor = (id: string) => votes.filter(v => v.candidate_id === id).length
   const candidatesForPosition = (position: string) => candidates.filter(c => c.position === position)
 
   const navItems: { id: AdminView; label: string; icon: any }[] = [
     { id: 'overview', label: 'Overview', icon: BarChart2 },
     { id: 'candidates', label: 'Candidates', icon: Users },
-    { id: 'results', label: 'Results', icon: Vote },
+    { id: 'results', label: 'Live Count', icon: Vote },
+    { id: 'final', label: 'Final Result', icon: AlertTriangle },
     { id: 'settings', label: 'Settings', icon: Settings },
   ]
 
+  const getStatusStyle = (status: string) => {
+    if (status === 'active') return { background: '#d1fae5', color: '#065f46' }
+    if (status === 'suspended') return { background: '#fee2e2', color: '#991b1b' }
+    if (status === 'disqualified') return { background: '#fef3c7', color: '#92400e' }
+    return { background: '#f1f5f9', color: '#64748b' }
+  }
+
+  const getStatusLabel = (status: string) => {
+    if (status === 'active') return 'Active'
+    if (status === 'suspended') return '🚫 Suspended'
+    if (status === 'disqualified') return '❌ Disqualified'
+    return status
+  }
+
   return (
     <div className="election-portal-bg min-h-screen">
-      {/* Top bar */}
       <div className="sticky top-0 z-10" style={{ background: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #e8eef6' }}>
         <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between">
           <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium" style={{ color: '#64748b' }}>
@@ -176,14 +205,12 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
             {getDisplayName(profile)}
           </div>
         </div>
-
-        {/* Tab nav */}
         <div className="max-w-2xl mx-auto px-4 flex gap-1 pb-2 overflow-x-auto">
           {navItems.map(({ id, label, icon: Icon }) => (
             <button key={id} onClick={() => setActiveView(id)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all"
               style={activeView === id
-                ? { background: '#1a9ef4', color: '#fff' }
+                ? { background: id === 'final' ? '#f59e0b' : '#1a9ef4', color: '#fff' }
                 : { background: '#f1f5f9', color: '#64748b' }}>
               <Icon className="w-3.5 h-3.5" />{label}
             </button>
@@ -203,7 +230,6 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
           {activeView === 'overview' && (
             <div>
               <h2 className="text-lg font-bold mb-4" style={{ color: '#0f172a' }}>Election Overview</h2>
-
               <div className="rounded-2xl p-4 mb-5 flex items-center justify-between"
                 style={{
                   background: settings.election_open ? 'linear-gradient(135deg, #d1fae5, #a7f3d0)' : 'linear-gradient(135deg, #fee2e2, #fecaca)',
@@ -224,11 +250,15 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-                <StatCard value={activeCandidates.length} label="CANDIDATES" />
-                <StatCard value={POSITIONS.length} label="POSITIONS" />
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                <StatCard value={activeCandidates.length} label="ACTIVE" />
+                <StatCard value={suspendedCandidates.length} label="SUSPENDED" color="#ef4444" />
+                <StatCard value={disqualifiedCandidates.length} label="DISQUALIFIED" color="#f59e0b" />
                 <StatCard value={submissions.length} label="VOTERS" color="#10b981" />
-                <StatCard value={votes.length} label="TOTAL VOTES" color="#8b5cf6" />
+              </div>
+              <div className="grid grid-cols-2 gap-3 mb-5">
+                <StatCard value={votes.length} label="TOTAL VOTES CAST" color="#8b5cf6" />
+                <StatCard value={POSITIONS.filter(p => candidates.some(c => c.position === p)).length} label="ACTIVE POSITIONS" color="#1a9ef4" />
               </div>
 
               <div className="rounded-2xl overflow-hidden" style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
@@ -237,7 +267,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                 </div>
                 {[
                   { key: 'election_open' as const, label: 'Election Open', desc: 'Allow members to vote' },
-                  { key: 'results_visible' as const, label: 'Results Visible', desc: 'Show live results publicly' },
+                  { key: 'results_visible' as const, label: 'Show Final Result', desc: 'Publish winners to voters — shows animated results page' },
                   { key: 'allow_changes' as const, label: 'Allow Vote Changes', desc: 'Before final submission' },
                 ].map(({ key, label, desc }) => (
                   <div key={key} className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid #f1f5f9' }}>
@@ -271,7 +301,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
             <div>
               <h2 className="text-lg font-bold mb-1" style={{ color: '#0f172a' }}>Manage Candidates</h2>
               <p className="text-xs mb-5" style={{ color: '#94a3b8' }}>
-                Add a candidate for each position. Upload their photo and enter their name, then tap Save.
+                Add candidates per position. Suspend to temporarily hide, or Disqualify to permanently remove from voting.
               </p>
 
               {POSITIONS.map((position, idx) => {
@@ -282,56 +312,96 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                   <div key={position} className="rounded-2xl mb-4 overflow-hidden"
                     style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
 
-                    {/* Position header */}
                     <div className="px-4 py-3 flex items-center gap-3"
                       style={{ background: 'linear-gradient(90deg, #eff6ff, #f8fafc)', borderBottom: '1px solid #e8eef6' }}>
                       <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
                         style={{ background: '#1a9ef4' }}>
                         {idx + 1}
                       </div>
-                      <div>
+                      <div className="flex-1">
                         <div className="font-bold text-sm" style={{ color: '#0f172a' }}>{position}</div>
-                        <div className="text-xs" style={{ color: '#94a3b8' }}>
-                          {existing.length} candidate{existing.length !== 1 ? 's' : ''} added
+                        <div className="text-xs flex gap-2 flex-wrap" style={{ color: '#94a3b8' }}>
+                          <span>{existing.filter(c => c.status === 'active').length} active</span>
+                          {existing.filter(c => c.status === 'suspended').length > 0 &&
+                            <span style={{ color: '#ef4444' }}>· {existing.filter(c => c.status === 'suspended').length} suspended</span>}
+                          {existing.filter(c => c.status === 'disqualified').length > 0 &&
+                            <span style={{ color: '#f59e0b' }}>· {existing.filter(c => c.status === 'disqualified').length} disqualified</span>}
                         </div>
                       </div>
                     </div>
 
-                    {/* Existing candidates for this position */}
                     {existing.length > 0 && (
                       <div className="px-4 pt-3 space-y-2">
                         {existing.map(candidate => (
-                          <div key={candidate.id} className="flex items-center justify-between gap-3 py-2"
-                            style={{ borderBottom: '1px solid #f1f5f9' }}>
+                          <div key={candidate.id}
+                            className="flex items-center justify-between gap-3 py-2 px-3 rounded-xl"
+                            style={{
+                              background: candidate.status === 'disqualified' ? '#fffbeb' : candidate.status === 'suspended' ? '#fff5f5' : 'transparent',
+                              border: candidate.status === 'disqualified' ? '1px solid #fde68a' : candidate.status === 'suspended' ? '1px solid #fecaca' : '1px solid transparent',
+                              marginBottom: 4,
+                              opacity: candidate.status !== 'active' ? 0.85 : 1
+                            }}>
                             <div className="flex items-center gap-3 min-w-0">
-                              {candidate.image_url ? (
-                                <img src={candidate.image_url} alt={candidate.name}
-                                  className="w-9 h-9 rounded-full object-cover shrink-0"
-                                  style={{ border: '2px solid #e8eef6' }} />
-                              ) : (
-                                <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
-                                  style={{ background: 'linear-gradient(135deg, #1a9ef4, #1a6fc4)' }}>
-                                  {candidate.name[0]?.toUpperCase()}
-                                </div>
-                              )}
+                              <div className="relative shrink-0">
+                                {candidate.image_url ? (
+                                  <img src={candidate.image_url} alt={candidate.name}
+                                    className="w-9 h-9 rounded-full object-cover"
+                                    style={{ border: '2px solid #e8eef6', filter: candidate.status !== 'active' ? 'grayscale(0.7)' : 'none' }} />
+                                ) : (
+                                  <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white"
+                                    style={{ background: candidate.status !== 'active' ? '#94a3b8' : 'linear-gradient(135deg, #1a9ef4, #1a6fc4)' }}>
+                                    {candidate.name[0]?.toUpperCase()}
+                                  </div>
+                                )}
+                                {candidate.status === 'suspended' && (
+                                  <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
+                                    style={{ background: '#ef4444' }}>
+                                    <Lock style={{ width: 8, height: 8, color: '#fff' }} />
+                                  </div>
+                                )}
+                                {candidate.status === 'disqualified' && (
+                                  <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
+                                    style={{ background: '#f59e0b' }}>
+                                    <Ban style={{ width: 8, height: 8, color: '#fff' }} />
+                                  </div>
+                                )}
+                              </div>
                               <div className="min-w-0">
-                                <div className="font-semibold text-sm truncate" style={{ color: '#0f172a' }}>{candidate.name}</div>
+                                <div className="font-semibold text-sm truncate" style={{ color: candidate.status !== 'active' ? '#94a3b8' : '#0f172a' }}>
+                                  {candidate.name}
+                                  {candidate.status !== 'active' && (
+                                    <span className="ml-1 text-xs" style={{ color: candidate.status === 'disqualified' ? '#d97706' : '#ef4444' }}>
+                                      ({candidate.status === 'disqualified' ? 'Disqualified' : 'Suspended'})
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="text-xs" style={{ color: '#94a3b8' }}>{voteCountFor(candidate.id)} votes</div>
                               </div>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex items-center gap-1.5 shrink-0">
                               <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-                                style={candidate.status === 'active'
-                                  ? { background: '#d1fae5', color: '#065f46' }
-                                  : { background: '#f1f5f9', color: '#64748b' }}>
-                                {candidate.status}
+                                style={getStatusStyle(candidate.status)}>
+                                {getStatusLabel(candidate.status)}
                               </span>
-                              <button onClick={() => toggleStatus(candidate.id, candidate.status)}
+                              {candidate.status !== 'disqualified' && (
+                                <button onClick={() => cycleStatus(candidate.id, candidate.status)}
+                                  className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
+                                  title={candidate.status === 'active' ? 'Suspend candidate' : 'Restore candidate'}
+                                  style={candidate.status === 'active'
+                                    ? { background: '#fee2e2', color: '#dc2626' }
+                                    : { background: '#d1fae5', color: '#059669' }}>
+                                  {candidate.status === 'active' ? <X className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                                </button>
+                              )}
+                              <button onClick={() => disqualifyCandidate(candidate.id, candidate.status)}
                                 className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
-                                style={candidate.status === 'active'
-                                  ? { background: '#fef3c7', color: '#d97706' }
-                                  : { background: '#d1fae5', color: '#059669' }}>
-                                {candidate.status === 'active' ? <X className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                                title={candidate.status === 'disqualified' ? 'Restore from disqualification' : 'Disqualify candidate'}
+                                style={candidate.status === 'disqualified'
+                                  ? { background: '#d1fae5', color: '#059669' }
+                                  : { background: '#fef3c7', color: '#d97706' }}>
+                                {candidate.status === 'disqualified'
+                                  ? <Check className="w-3.5 h-3.5" />
+                                  : <Ban className="w-3.5 h-3.5" />}
                               </button>
                               <button onClick={() => deleteCandidate(candidate.id)}
                                 className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
@@ -344,11 +414,8 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                       </div>
                     )}
 
-                    {/* Add candidate form for this position */}
                     <div className="px-4 py-4">
                       <div className="flex gap-3 items-start">
-
-                        {/* Photo upload circle */}
                         <div className="shrink-0">
                           <div
                             onClick={() => fileInputRefs.current[position]?.click()}
@@ -361,8 +428,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                               <div className="w-5 h-5 rounded-full animate-spin"
                                 style={{ border: '2px solid #e2eaf4', borderTopColor: '#1a9ef4' }} />
                             ) : draft.imagePreview ? (
-                              <img src={draft.imagePreview} alt="preview"
-                                className="w-full h-full object-cover" />
+                              <img src={draft.imagePreview} alt="preview" className="w-full h-full object-cover" />
                             ) : (
                               <Camera className="w-5 h-5" style={{ color: '#94a3b8' }} />
                             )}
@@ -382,8 +448,6 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                             }}
                           />
                         </div>
-
-                        {/* Name input + save button */}
                         <div className="flex-1 min-w-0">
                           <input
                             className="w-full rounded-xl px-3 py-2.5 text-sm outline-none transition-all mb-2"
@@ -416,82 +480,186 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
             </div>
           )}
 
-          {/* ── Results ── */}
+          {/* ── Live Count ── */}
           {activeView === 'results' && (
             <div>
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold" style={{ color: '#0f172a' }}>Live Results</h2>
-                <span className="text-xs px-3 py-1 rounded-full font-medium"
-                  style={settings.results_visible
-                    ? { background: '#d1fae5', color: '#065f46' }
-                    : { background: '#fee2e2', color: '#991b1b' }}>
-                  {settings.results_visible ? 'Public' : 'Hidden'}
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-lg font-bold" style={{ color: '#0f172a' }}>Live Vote Count</h2>
+                <span className="text-xs px-3 py-1 rounded-full font-medium animate-pulse"
+                  style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}>
+                  🔴 Live
                 </span>
               </div>
+              <p className="text-xs mb-5" style={{ color: '#94a3b8' }}>
+                Real-time count as votes come in. Candidates shown in order added.
+              </p>
 
-              <div className="rounded-2xl p-4 mb-5 flex items-center justify-between"
-                style={{ background: '#f8fafc', border: '1px solid #e8eef6' }}>
-                <div>
-                  <div className="text-sm font-semibold" style={{ color: '#0f172a' }}>Total Voters</div>
-                  <div className="text-xs" style={{ color: '#94a3b8' }}>{submissions.length} members have submitted their ballot</div>
+              <div className="grid grid-cols-2 gap-3 mb-5">
+                <div className="rounded-2xl p-4" style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                  <div className="text-2xl font-bold" style={{ color: '#10b981' }}>{submissions.length}</div>
+                  <div className="text-xs font-medium mt-1" style={{ color: '#94a3b8' }}>TOTAL VOTERS</div>
                 </div>
-                <div className="text-2xl font-bold" style={{ color: '#1a9ef4' }}>{submissions.length}</div>
+                <div className="rounded-2xl p-4" style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                  <div className="text-2xl font-bold" style={{ color: '#8b5cf6' }}>{votes.length}</div>
+                  <div className="text-xs font-medium mt-1" style={{ color: '#94a3b8' }}>TOTAL VOTES CAST</div>
+                </div>
               </div>
 
               {POSITIONS.map(position => {
-                const posCandidates = [...candidates.filter(c => c.position === position)]
-                  .sort((a, b) => voteCountFor(b.id) - voteCountFor(a.id))
+                const posCandidates = candidates.filter(c => c.position === position)
                 const total = posCandidates.reduce((s, c) => s + voteCountFor(c.id), 0)
-
                 return (
                   <div key={position} className="rounded-2xl p-5 mb-4"
                     style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="font-bold" style={{ color: '#0f172a' }}>{position}</h3>
-                      <span className="text-xs" style={{ color: '#94a3b8' }}>{total} total votes</span>
+                      <span className="text-xs font-semibold px-2 py-1 rounded-full" style={{ background: '#eff6ff', color: '#1a6fc4' }}>{total} total votes</span>
                     </div>
-
                     {posCandidates.length === 0 ? (
                       <p className="text-xs" style={{ color: '#cbd5e1' }}>No candidates added yet</p>
                     ) : (
-                      <div className="space-y-4">
-                        {posCandidates.map((candidate, idx) => {
+                      <div className="space-y-3">
+                        {posCandidates.map(candidate => {
                           const count = voteCountFor(candidate.id)
                           const pct = total > 0 ? Math.round((count / total) * 100) : 0
-                          const isWinner = idx === 0 && count > 0
+                          const isDisqualified = candidate.status === 'disqualified'
+                          const isSuspended = candidate.status === 'suspended'
+                          return (
+                            <div key={candidate.id} style={{ opacity: isDisqualified ? 0.5 : isSuspended ? 0.65 : 1 }}>
+                              <div className="flex items-center gap-3 mb-2">
+                                {candidate.image_url ? (
+                                  <img src={candidate.image_url} alt={candidate.name}
+                                    className="w-8 h-8 rounded-full object-cover shrink-0"
+                                    style={{ border: '2px solid #e8eef6', filter: candidate.status !== 'active' ? 'grayscale(1)' : 'none' }} />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
+                                    style={{ background: candidate.status !== 'active' ? '#94a3b8' : 'linear-gradient(135deg, #1a9ef4, #1a6fc4)' }}>
+                                    {candidate.name[0]?.toUpperCase()}
+                                  </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-sm font-semibold" style={{ color: candidate.status !== 'active' ? '#94a3b8' : '#0f172a' }}>{candidate.name}</span>
+                                    {isSuspended && <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: '#fee2e2', color: '#dc2626' }}>🚫 Suspended</span>}
+                                    {isDisqualified && <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: '#fef3c7', color: '#d97706' }}>❌ Disqualified</span>}
+                                  </div>
+                                </div>
+                                <span className="text-sm font-bold shrink-0" style={{ color: '#64748b' }}>{count} <span style={{ fontSize: 10, color: '#94a3b8' }}>({pct}%)</span></span>
+                              </div>
+                              <div className="w-full h-2.5 rounded-full ml-11" style={{ background: '#f1f5f9' }}>
+                                <div className="h-2.5 rounded-full transition-all duration-700"
+                                  style={{ width: `${pct}%`, background: isDisqualified ? '#fde68a' : isSuspended ? '#cbd5e1' : 'linear-gradient(90deg, #1a9ef4, #1a6fc4)' }} />
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
+          {/* ── Final Result ── */}
+          {activeView === 'final' && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-lg font-bold" style={{ color: '#0f172a' }}>Final Election Result</h2>
+                <span className="text-xs px-3 py-1 rounded-full font-bold"
+                  style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>
+                  🏆 Official
+                </span>
+              </div>
+              <div className="rounded-xl p-3 mb-3 text-sm"
+                style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e' }}>
+                <strong>Admin only.</strong> Toggle "Show Final Result" in Quick Settings to publish winners to voters.
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 mb-5">
+                <div className="rounded-2xl p-4" style={{ background: '#fff', border: '1px solid #e8eef6' }}>
+                  <div className="text-2xl font-bold" style={{ color: '#10b981' }}>{submissions.length}</div>
+                  <div className="text-xs font-medium mt-1" style={{ color: '#94a3b8' }}>TOTAL VOTERS</div>
+                </div>
+                <div className="rounded-2xl p-4" style={{ background: '#fff', border: '1px solid #e8eef6' }}>
+                  <div className="text-2xl font-bold" style={{ color: '#8b5cf6' }}>{votes.length}</div>
+                  <div className="text-xs font-medium mt-1" style={{ color: '#94a3b8' }}>TOTAL VOTES CAST</div>
+                </div>
+              </div>
+
+              {POSITIONS.map((position, posIdx) => {
+                const allPos = candidates.filter(c => c.position === position)
+                const eligibleCandidates = [...allPos.filter(c => c.status === 'active')]
+                  .sort((a, b) => voteCountFor(b.id) - voteCountFor(a.id))
+                const ineligible = allPos.filter(c => c.status !== 'active')
+                const total = allPos.reduce((s, c) => s + voteCountFor(c.id), 0)
+                const winner = eligibleCandidates[0]
+
+                return (
+                  <div key={position} className="rounded-2xl p-5 mb-4"
+                    style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
+                        style={{ background: '#f59e0b' }}>{posIdx + 1}</div>
+                      <h3 className="font-bold flex-1" style={{ color: '#0f172a' }}>{position}</h3>
+                      <span className="text-xs font-semibold px-2 py-1 rounded-full" style={{ background: '#eff6ff', color: '#1a6fc4' }}>{total} total votes</span>
+                    </div>
+
+                    {eligibleCandidates.length === 0 ? (
+                      <p className="text-xs" style={{ color: '#cbd5e1' }}>No active candidates</p>
+                    ) : (
+                      <div className="space-y-4">
+                        {eligibleCandidates.map((candidate, idx) => {
+                          const count = voteCountFor(candidate.id)
+                          const pct = total > 0 ? Math.round((count / total) * 100) : 0
+                          const isWinner = idx === 0 && count > 0 && count > (voteCountFor(eligibleCandidates[1]?.id) || 0)
                           return (
                             <div key={candidate.id}>
                               <div className="flex items-center gap-3 mb-2">
                                 {candidate.image_url ? (
                                   <img src={candidate.image_url} alt={candidate.name}
                                     className="w-8 h-8 rounded-full object-cover shrink-0"
-                                    style={{ border: '2px solid #e8eef6' }} />
+                                    style={{ border: isWinner ? '2px solid #f59e0b' : '2px solid #e8eef6' }} />
                                 ) : (
                                   <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
-                                    style={{ background: isWinner ? 'linear-gradient(135deg, #1a9ef4, #1a6fc4)' : '#94a3b8' }}>
+                                    style={{ background: isWinner ? 'linear-gradient(135deg, #f59e0b, #d97706)' : '#94a3b8' }}>
                                     {candidate.name[0]?.toUpperCase()}
                                   </div>
                                 )}
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="text-sm font-semibold" style={{ color: '#0f172a' }}>{candidate.name}</span>
-                                    {isWinner && count > 0 && (
+                                    {isWinner && (
                                       <span className="text-xs px-2 py-0.5 rounded-full font-bold"
-                                        style={{ background: '#fef3c7', color: '#d97706' }}>👑 Leading</span>
+                                        style={{ background: '#fef3c7', color: '#d97706' }}>👑 Winner</span>
                                     )}
                                   </div>
                                 </div>
-                                <span className="text-sm font-bold shrink-0" style={{ color: isWinner ? '#1a9ef4' : '#64748b' }}>{pct}%</span>
+                                <span className="text-sm font-bold shrink-0" style={{ color: isWinner ? '#f59e0b' : '#64748b' }}>{count} <span style={{ fontSize: 10 }}>({pct}%)</span></span>
                               </div>
                               <div className="w-full h-2.5 rounded-full ml-11" style={{ background: '#f1f5f9' }}>
                                 <div className="h-2.5 rounded-full transition-all duration-700"
-                                  style={{ width: `${pct}%`, background: isWinner ? 'linear-gradient(90deg, #1a9ef4, #1a6fc4)' : '#94a3b8' }} />
+                                  style={{ width: `${pct}%`, background: isWinner ? 'linear-gradient(90deg, #f59e0b, #d97706)' : '#94a3b8' }} />
                               </div>
                               <div className="ml-11 mt-1 text-xs" style={{ color: '#94a3b8' }}>{count} vote{count !== 1 ? 's' : ''}</div>
                             </div>
                           )
                         })}
+
+                        {ineligible.length > 0 && (
+                          <div className="mt-2 pt-2" style={{ borderTop: '1px dashed #fde68a' }}>
+                            <div className="text-xs font-semibold mb-2" style={{ color: '#94a3b8' }}>Not counted (suspended/disqualified):</div>
+                            {ineligible.map(candidate => (
+                              <div key={candidate.id} className="flex items-center gap-2 py-1 opacity-50">
+                                <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
+                                  style={{ background: '#94a3b8' }}>{candidate.name[0]?.toUpperCase()}</div>
+                                <span className="text-xs flex-1" style={{ color: '#94a3b8' }}>{candidate.name}</span>
+                                <span className="text-xs px-1.5 py-0.5 rounded-full" style={getStatusStyle(candidate.status)}>{getStatusLabel(candidate.status)}</span>
+                                <span className="text-xs ml-auto" style={{ color: '#94a3b8' }}>{voteCountFor(candidate.id)} votes</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -514,8 +682,8 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                 <ToggleSwitch
                   value={settings.results_visible}
                   onToggle={() => updateSetting('results_visible', !settings.results_visible)}
-                  label="Results Visible"
-                  description="Show live vote counts to the public"
+                  label="Show Final Result to Voters"
+                  description="Publish winners with animation — voters see final results page"
                 />
                 <ToggleSwitch
                   value={settings.allow_changes}
@@ -524,7 +692,6 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                   description="Members can change votes before final submission"
                 />
               </div>
-
               <div className="rounded-2xl p-5" style={{ background: '#fff7f7', border: '2px solid #fee2e2' }}>
                 <h3 className="font-bold text-sm mb-1" style={{ color: '#991b1b' }}>Danger Zone</h3>
                 <p className="text-xs mb-4" style={{ color: '#b91c1c' }}>
