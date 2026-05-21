@@ -39,7 +39,7 @@ function CandidateAvatar({ name, imageUrl, size = 48, suspended = false }: { nam
 
 export default function ElectionVoting({ onBack, settings }: {
   onBack: () => void
-  settings: { electionOpen: boolean; resultsVisible: boolean; allowChanges: boolean }
+  settings: { electionOpen: boolean; resultsVisible: boolean; allowChanges: boolean; liveCountVisible: boolean }
 }) {
   const { user, profile } = useAuth()
   const [candidates, setCandidates] = useState<Candidate[]>([])
@@ -54,6 +54,10 @@ export default function ElectionVoting({ onBack, settings }: {
   const [justSubmitted, setJustSubmitted] = useState(false)
   const [animating, setAnimating] = useState<string | null>(null)
   const realtimeRef = useRef<any>(null)
+
+  // liveCountVisible controls vote bars/counts inside the voting interface
+  // resultsVisible controls access to the separate Final Results page
+  const showLiveCount = settings.liveCountVisible
 
   useEffect(() => {
     fetchAll()
@@ -106,7 +110,8 @@ export default function ElectionVoting({ onBack, settings }: {
       setHasSubmitted(!!submission)
     }
 
-    if (settings.resultsVisible) {
+    // Fetch live counts if either live count or final results are enabled
+    if (settings.liveCountVisible || settings.resultsVisible) {
       await fetchLiveCounts()
       setupRealtime()
     }
@@ -197,7 +202,7 @@ export default function ElectionVoting({ onBack, settings }: {
           <p className="text-sm mb-6" style={{ color: '#64748b' }}>
             Your vote has been recorded securely. Thank you for participating in the NACSFUTO elections.
           </p>
-          {settings.resultsVisible && (
+          {showLiveCount && (
             <button onClick={() => setJustSubmitted(false)} className="election-cta-btn mb-3">View Live Count</button>
           )}
           <button onClick={onBack} className="w-full py-3 rounded-xl text-sm font-medium transition-colors"
@@ -246,8 +251,8 @@ export default function ElectionVoting({ onBack, settings }: {
 
       <div className="max-w-2xl mx-auto px-4 py-6">
 
-        {/* Live stats bar */}
-        {settings.resultsVisible && (
+        {/* Live stats bar — only shown when liveCountVisible is ON */}
+        {showLiveCount && (
           <div className="rounded-2xl p-4 mb-5 flex items-center justify-between gap-4"
             style={{ background: 'linear-gradient(135deg, #eff6ff, #dbeafe)', border: '1px solid #bfdbfe' }}>
             <div className="text-center flex-1">
@@ -279,7 +284,7 @@ export default function ElectionVoting({ onBack, settings }: {
             <div>
               <p className="text-sm font-bold" style={{ color: '#065f46' }}>Ballot Already Submitted</p>
               <p className="text-xs" style={{ color: '#047857' }}>
-                {settings.resultsVisible ? 'Live vote count is shown below.' : 'Results will be revealed when announced.'}
+                {showLiveCount ? 'Live vote count is shown below.' : 'Results will be revealed when announced.'}
               </p>
             </div>
           </div>
@@ -348,7 +353,7 @@ export default function ElectionVoting({ onBack, settings }: {
                       <div className="text-xs flex items-center gap-2 flex-wrap" style={{ color: '#94a3b8' }}>
                         <span>{activeCands.length} candidate{activeCands.length !== 1 ? 's' : ''}</span>
                         {myVoteSet.size > 0 && <span className="font-semibold" style={{ color: '#1a9ef4' }}>· {myVoteSet.size} selected</span>}
-                        {settings.resultsVisible && <span style={{ color: '#10b981', fontWeight: 600 }}>· {total} votes</span>}
+                        {showLiveCount && <span style={{ color: '#10b981', fontWeight: 600 }}>· {total} votes</span>}
                       </div>
                     </div>
                   </div>
@@ -406,7 +411,7 @@ export default function ElectionVoting({ onBack, settings }: {
                               <CandidateAvatar name={candidate.name} imageUrl={candidate.image_url} size={40} />
                               <div className="flex-1 min-w-0">
                                 <div className="font-semibold text-sm leading-tight" style={{ color: '#0f172a' }}>{candidate.name}</div>
-                                {settings.resultsVisible && (
+                                {showLiveCount && (
                                   <div className="text-xs mt-0.5 font-medium" style={{ color: '#64748b' }}>
                                     {count} vote{count !== 1 ? 's' : ''} · {pct}%
                                   </div>
@@ -414,7 +419,7 @@ export default function ElectionVoting({ onBack, settings }: {
                               </div>
                               {isSelected && !isSaving && <CheckCircle className="w-5 h-5 shrink-0" style={{ color: '#1a9ef4' }} />}
                             </div>
-                            {settings.resultsVisible && (
+                            {showLiveCount && (
                               <div className="mt-2.5 ml-8">
                                 <div className="w-full h-1.5 rounded-full" style={{ background: '#e8eef6' }}>
                                   <div className="h-1.5 rounded-full transition-all duration-700"
