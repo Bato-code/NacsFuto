@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { ArrowLeft, Plus, Trash2, Check, X, Users, Vote, BarChart2, Settings, ChevronRight } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { ArrowLeft, Trash2, Check, X, Users, Vote, BarChart2, Settings, Camera, Save } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth, getDisplayName } from '../contexts/AuthContext'
 
@@ -7,6 +7,20 @@ interface Candidate { id: string; name: string; position: string; image_url?: st
 interface ElectionSettings { election_open: boolean; results_visible: boolean; allow_changes: boolean }
 
 type AdminView = 'overview' | 'candidates' | 'results' | 'settings'
+
+const POSITIONS = [
+  'President',
+  'Vice President',
+  'Secretary General',
+  'Financial Secretary',
+  'Assistant Secretary General',
+  'Treasurer',
+  'Director of Welfare',
+  'Director of ICT & Research',
+  'Director of Socials',
+  'Director of Protocol (PRO)',
+  'Director of Sports',
+]
 
 function ToggleSwitch({ value, onToggle, label, description }: {
   value: boolean; onToggle: () => void; label: string; description?: string
@@ -45,9 +59,13 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
   const [votes, setVotes] = useState<any[]>([])
   const [submissions, setSubmissions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [newCandidate, setNewCandidate] = useState({ name: '', position: '', image_url: '' })
-  const [adding, setAdding] = useState(false)
   const [savingSettings, setSavingSettings] = useState(false)
+
+  // Draft state: one candidate slot per position
+  const [drafts, setDrafts] = useState<Record<string, { name: string; image_url: string; imagePreview: string | null; uploading: boolean; saving: boolean }>>(
+    () => Object.fromEntries(POSITIONS.map(p => [p, { name: '', image_url: '', imagePreview: null, uploading: false, saving: false }]))
+  )
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   useEffect(() => { fetchAll() }, [])
 
@@ -69,17 +87,46 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
   const updateSetting = async (key: keyof ElectionSettings, value: boolean) => {
     setSavingSettings(true)
     const updated = { ...settings, [key]: value, updated_at: new Date().toISOString() }
-    await supabase.from('election_settings').update(updated).eq('id', 1)
-    setSettings(prev => ({ ...prev, [key]: value }))
+    const { error } = await supabase.from('election_settings').update(updated).eq('id', 1)
+    if (error) {
+      alert('Failed to update setting: ' + error.message)
+    } else {
+      setSettings(prev => ({ ...prev, [key]: value }))
+    }
     setSavingSettings(false)
   }
 
-  const addCandidate = async () => {
-    if (!newCandidate.name.trim() || !newCandidate.position.trim()) return
-    setAdding(true)
-    await supabase.from('election_candidates').insert({ ...newCandidate, status: 'active' })
-    setNewCandidate({ name: '', position: '', image_url: '' })
-    setAdding(false)
+  const handleImageUpload = async (position: string, file: File) => {
+    setDrafts(prev => ({ ...prev, [position]: { ...prev[position], uploading: true } }))
+    const ext = file.name.split('.').pop()
+    const path = `candidate-${Date.now()}.${ext}`
+    const { error } = await supabase.storage.from('candidates').upload(path, file, { upsert: true })
+    if (error) {
+      alert('Image upload failed: ' + error.message)
+      setDrafts(prev => ({ ...prev, [position]: { ...prev[position], uploading: false } }))
+      return
+    }
+    const { data } = supabase.storage.from('candidates').getPublicUrl(path)
+    setDrafts(prev => ({
+      ...prev,
+      [position]: { ...prev[position], image_url: data.publicUrl, imagePreview: data.publicUrl, uploading: false }
+    }))
+  }
+
+  const saveCandidate = async (position: string) => {
+    const draft = drafts[position]
+    if (!draft.name.trim()) return
+    setDrafts(prev => ({ ...prev, [position]: { ...prev[position], saving: true } }))
+    await supabase.from('election_candidates').insert({
+      name: draft.name.trim(),
+      position,
+      image_url: draft.image_url || null,
+      status: 'active',
+    })
+    setDrafts(prev => ({
+      ...prev,
+      [position]: { name: '', image_url: '', imagePreview: null, uploading: false, saving: false }
+    }))
     fetchAll()
   }
 
@@ -103,9 +150,9 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
     fetchAll()
   }
 
-  const positions = [...new Set(candidates.map(c => c.position))]
   const activeCandidates = candidates.filter(c => c.status === 'active')
   const voteCountFor = (id: string) => votes.filter(v => v.candidate_id === id).length
+  const candidatesForPosition = (position: string) => candidates.filter(c => c.position === position)
 
   const navItems: { id: AdminView; label: string; icon: any }[] = [
     { id: 'overview', label: 'Overview', icon: BarChart2 },
@@ -157,7 +204,6 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
             <div>
               <h2 className="text-lg font-bold mb-4" style={{ color: '#0f172a' }}>Election Overview</h2>
 
-              {/* Status banner */}
               <div className="rounded-2xl p-4 mb-5 flex items-center justify-between"
                 style={{
                   background: settings.election_open ? 'linear-gradient(135deg, #d1fae5, #a7f3d0)' : 'linear-gradient(135deg, #fee2e2, #fecaca)',
@@ -178,15 +224,13 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                 </button>
               </div>
 
-              {/* Stats grid */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
                 <StatCard value={activeCandidates.length} label="CANDIDATES" />
-                <StatCard value={positions.length} label="POSITIONS" />
+                <StatCard value={POSITIONS.length} label="POSITIONS" />
                 <StatCard value={submissions.length} label="VOTERS" color="#10b981" />
                 <StatCard value={votes.length} label="TOTAL VOTES" color="#8b5cf6" />
               </div>
 
-              {/* Quick actions */}
               <div className="rounded-2xl overflow-hidden" style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                 <div className="px-4 py-3" style={{ borderBottom: '1px solid #f1f5f9' }}>
                   <span className="text-sm font-bold" style={{ color: '#0f172a' }}>Quick Settings</span>
@@ -225,112 +269,150 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
           {/* ── Candidates ── */}
           {activeView === 'candidates' && (
             <div>
-              <h2 className="text-lg font-bold mb-4" style={{ color: '#0f172a' }}>Manage Candidates</h2>
+              <h2 className="text-lg font-bold mb-1" style={{ color: '#0f172a' }}>Manage Candidates</h2>
+              <p className="text-xs mb-5" style={{ color: '#94a3b8' }}>
+                Add a candidate for each position. Upload their photo and enter their name, then tap Save.
+              </p>
 
-              {/* Add form */}
-              <div className="rounded-2xl p-5 mb-5" style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                <h3 className="font-bold text-sm mb-4" style={{ color: '#0f172a' }}>Add New Candidate</h3>
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs font-medium mb-1 block" style={{ color: '#64748b' }}>Full Name *</label>
-                    <input
-                      className="w-full rounded-xl px-3 py-2.5 text-sm outline-none transition-all"
-                      style={{ background: '#f8fafc', border: '1px solid #e8eef6', color: '#0f172a' }}
-                      placeholder="Candidate's full name"
-                      value={newCandidate.name}
-                      onChange={e => setNewCandidate({ ...newCandidate, name: e.target.value })}
-                      onFocus={e => (e.target as HTMLInputElement).style.borderColor = '#1a9ef4'}
-                      onBlur={e => (e.target as HTMLInputElement).style.borderColor = '#e8eef6'}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium mb-1 block" style={{ color: '#64748b' }}>Position *</label>
-                    <input
-                      className="w-full rounded-xl px-3 py-2.5 text-sm outline-none transition-all"
-                      style={{ background: '#f8fafc', border: '1px solid #e8eef6', color: '#0f172a' }}
-                      placeholder="e.g., President, Vice President"
-                      value={newCandidate.position}
-                      onChange={e => setNewCandidate({ ...newCandidate, position: e.target.value })}
-                      onFocus={e => (e.target as HTMLInputElement).style.borderColor = '#1a9ef4'}
-                      onBlur={e => (e.target as HTMLInputElement).style.borderColor = '#e8eef6'}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium mb-1 block" style={{ color: '#64748b' }}>Photo URL (optional)</label>
-                    <input
-                      className="w-full rounded-xl px-3 py-2.5 text-sm outline-none transition-all"
-                      style={{ background: '#f8fafc', border: '1px solid #e8eef6', color: '#0f172a' }}
-                      placeholder="https://..."
-                      value={newCandidate.image_url}
-                      onChange={e => setNewCandidate({ ...newCandidate, image_url: e.target.value })}
-                      onFocus={e => (e.target as HTMLInputElement).style.borderColor = '#1a9ef4'}
-                      onBlur={e => (e.target as HTMLInputElement).style.borderColor = '#e8eef6'}
-                    />
-                  </div>
-                  <button onClick={addCandidate} disabled={adding}
-                    className="election-cta-btn" style={{ marginTop: 4 }}>
-                    <Plus className="w-4 h-4 inline mr-1" />
-                    {adding ? 'Adding...' : 'Add Candidate'}
-                  </button>
-                </div>
-              </div>
+              {POSITIONS.map((position, idx) => {
+                const existing = candidatesForPosition(position)
+                const draft = drafts[position]
 
-              {/* Candidates grouped by position */}
-              {positions.length === 0 ? (
-                <div className="text-center py-12" style={{ color: '#94a3b8' }}>
-                  <Users className="w-10 h-10 mx-auto mb-3 opacity-40" />
-                  <p className="text-sm">No candidates added yet.</p>
-                </div>
-              ) : (
-                positions.map(position => (
-                  <div key={position} className="mb-4">
-                    <div className="flex items-center gap-2 mb-2 px-1">
-                      <Vote className="w-4 h-4" style={{ color: '#1a9ef4' }} />
-                      <span className="font-bold text-sm" style={{ color: '#0f172a' }}>{position}</span>
-                      <span className="text-xs" style={{ color: '#94a3b8' }}>
-                        ({candidates.filter(c => c.position === position).length} candidates)
-                      </span>
-                    </div>
-                    <div className="space-y-2">
-                      {candidates.filter(c => c.position === position).map(candidate => (
-                        <div key={candidate.id} className="rounded-2xl p-3 flex items-center justify-between gap-3"
-                          style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
-                              style={{ background: 'linear-gradient(135deg, #1a9ef4, #1a6fc4)' }}>
-                              {candidate.name[0]?.toUpperCase()}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="font-semibold text-sm truncate" style={{ color: '#0f172a' }}>{candidate.name}</div>
-                              <div className="text-xs" style={{ color: '#94a3b8' }}>{voteCountFor(candidate.id)} votes</div>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-                              style={candidate.status === 'active'
-                                ? { background: '#d1fae5', color: '#065f46' }
-                                : { background: '#f1f5f9', color: '#64748b' }}>
-                              {candidate.status}
-                            </span>
-                            <button onClick={() => toggleStatus(candidate.id, candidate.status)}
-                              className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
-                              style={candidate.status === 'active'
-                                ? { background: '#fef3c7', color: '#d97706' }
-                                : { background: '#d1fae5', color: '#059669' }}>
-                              {candidate.status === 'active' ? <X className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
-                            </button>
-                            <button onClick={() => deleteCandidate(candidate.id)}
-                              className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
-                              style={{ background: '#fee2e2', color: '#dc2626' }}>
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
+                return (
+                  <div key={position} className="rounded-2xl mb-4 overflow-hidden"
+                    style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+
+                    {/* Position header */}
+                    <div className="px-4 py-3 flex items-center gap-3"
+                      style={{ background: 'linear-gradient(90deg, #eff6ff, #f8fafc)', borderBottom: '1px solid #e8eef6' }}>
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
+                        style={{ background: '#1a9ef4' }}>
+                        {idx + 1}
+                      </div>
+                      <div>
+                        <div className="font-bold text-sm" style={{ color: '#0f172a' }}>{position}</div>
+                        <div className="text-xs" style={{ color: '#94a3b8' }}>
+                          {existing.length} candidate{existing.length !== 1 ? 's' : ''} added
                         </div>
-                      ))}
+                      </div>
+                    </div>
+
+                    {/* Existing candidates for this position */}
+                    {existing.length > 0 && (
+                      <div className="px-4 pt-3 space-y-2">
+                        {existing.map(candidate => (
+                          <div key={candidate.id} className="flex items-center justify-between gap-3 py-2"
+                            style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <div className="flex items-center gap-3 min-w-0">
+                              {candidate.image_url ? (
+                                <img src={candidate.image_url} alt={candidate.name}
+                                  className="w-9 h-9 rounded-full object-cover shrink-0"
+                                  style={{ border: '2px solid #e8eef6' }} />
+                              ) : (
+                                <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
+                                  style={{ background: 'linear-gradient(135deg, #1a9ef4, #1a6fc4)' }}>
+                                  {candidate.name[0]?.toUpperCase()}
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <div className="font-semibold text-sm truncate" style={{ color: '#0f172a' }}>{candidate.name}</div>
+                                <div className="text-xs" style={{ color: '#94a3b8' }}>{voteCountFor(candidate.id)} votes</div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                                style={candidate.status === 'active'
+                                  ? { background: '#d1fae5', color: '#065f46' }
+                                  : { background: '#f1f5f9', color: '#64748b' }}>
+                                {candidate.status}
+                              </span>
+                              <button onClick={() => toggleStatus(candidate.id, candidate.status)}
+                                className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
+                                style={candidate.status === 'active'
+                                  ? { background: '#fef3c7', color: '#d97706' }
+                                  : { background: '#d1fae5', color: '#059669' }}>
+                                {candidate.status === 'active' ? <X className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                              </button>
+                              <button onClick={() => deleteCandidate(candidate.id)}
+                                className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
+                                style={{ background: '#fee2e2', color: '#dc2626' }}>
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Add candidate form for this position */}
+                    <div className="px-4 py-4">
+                      <div className="flex gap-3 items-start">
+
+                        {/* Photo upload circle */}
+                        <div className="shrink-0">
+                          <div
+                            onClick={() => fileInputRefs.current[position]?.click()}
+                            className="w-14 h-14 rounded-full flex items-center justify-center cursor-pointer transition-all overflow-hidden"
+                            style={{
+                              background: draft.imagePreview ? 'transparent' : '#f1f5f9',
+                              border: draft.imagePreview ? '2px solid #1a9ef4' : '2px dashed #cbd5e1'
+                            }}>
+                            {draft.uploading ? (
+                              <div className="w-5 h-5 rounded-full animate-spin"
+                                style={{ border: '2px solid #e2eaf4', borderTopColor: '#1a9ef4' }} />
+                            ) : draft.imagePreview ? (
+                              <img src={draft.imagePreview} alt="preview"
+                                className="w-full h-full object-cover" />
+                            ) : (
+                              <Camera className="w-5 h-5" style={{ color: '#94a3b8' }} />
+                            )}
+                          </div>
+                          <p className="text-center text-xs mt-1" style={{ color: '#94a3b8', fontSize: '10px' }}>
+                            {draft.imagePreview ? 'Change' : 'Photo'}
+                          </p>
+                          <input
+                            ref={el => { fileInputRefs.current[position] = el }}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            disabled={draft.uploading}
+                            onChange={e => {
+                              const file = e.target.files?.[0]
+                              if (file) handleImageUpload(position, file)
+                            }}
+                          />
+                        </div>
+
+                        {/* Name input + save button */}
+                        <div className="flex-1 min-w-0">
+                          <input
+                            className="w-full rounded-xl px-3 py-2.5 text-sm outline-none transition-all mb-2"
+                            style={{ background: '#f8fafc', border: '1px solid #e8eef6', color: '#0f172a' }}
+                            placeholder="Candidate's full name"
+                            value={draft.name}
+                            onChange={e => setDrafts(prev => ({ ...prev, [position]: { ...prev[position], name: e.target.value } }))}
+                            onFocus={e => (e.target as HTMLInputElement).style.borderColor = '#1a9ef4'}
+                            onBlur={e => (e.target as HTMLInputElement).style.borderColor = '#e8eef6'}
+                            onKeyDown={e => { if (e.key === 'Enter') saveCandidate(position) }}
+                          />
+                          <button
+                            onClick={() => saveCandidate(position)}
+                            disabled={!draft.name.trim() || draft.saving || draft.uploading}
+                            className="w-full py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+                            style={{
+                              background: draft.name.trim() && !draft.saving ? '#1a9ef4' : '#e2e8f0',
+                              color: draft.name.trim() && !draft.saving ? '#fff' : '#94a3b8',
+                              cursor: draft.name.trim() && !draft.saving ? 'pointer' : 'not-allowed'
+                            }}>
+                            <Save className="w-3.5 h-3.5" />
+                            {draft.saving ? 'Saving...' : 'Save Candidate'}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                ))
-              )}
+                )
+              })}
             </div>
           )}
 
@@ -356,25 +438,22 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                 <div className="text-2xl font-bold" style={{ color: '#1a9ef4' }}>{submissions.length}</div>
               </div>
 
-              {positions.length === 0 ? (
-                <div className="text-center py-12" style={{ color: '#94a3b8' }}>
-                  <BarChart2 className="w-10 h-10 mx-auto mb-3 opacity-40" />
-                  <p className="text-sm">No results yet.</p>
-                </div>
-              ) : (
-                positions.map(position => {
-                  const posCandidates = [...candidates.filter(c => c.position === position)]
-                    .sort((a, b) => voteCountFor(b.id) - voteCountFor(a.id))
-                  const total = posCandidates.reduce((s, c) => s + voteCountFor(c.id), 0)
-                  const winner = posCandidates[0]
+              {POSITIONS.map(position => {
+                const posCandidates = [...candidates.filter(c => c.position === position)]
+                  .sort((a, b) => voteCountFor(b.id) - voteCountFor(a.id))
+                const total = posCandidates.reduce((s, c) => s + voteCountFor(c.id), 0)
 
-                  return (
-                    <div key={position} className="rounded-2xl p-5 mb-4"
-                      style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-bold" style={{ color: '#0f172a' }}>{position}</h3>
-                        <span className="text-xs" style={{ color: '#94a3b8' }}>{total} total votes</span>
-                      </div>
+                return (
+                  <div key={position} className="rounded-2xl p-5 mb-4"
+                    style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-bold" style={{ color: '#0f172a' }}>{position}</h3>
+                      <span className="text-xs" style={{ color: '#94a3b8' }}>{total} total votes</span>
+                    </div>
+
+                    {posCandidates.length === 0 ? (
+                      <p className="text-xs" style={{ color: '#cbd5e1' }}>No candidates added yet</p>
+                    ) : (
                       <div className="space-y-4">
                         {posCandidates.map((candidate, idx) => {
                           const count = voteCountFor(candidate.id)
@@ -384,10 +463,16 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                           return (
                             <div key={candidate.id}>
                               <div className="flex items-center gap-3 mb-2">
-                                <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
-                                  style={{ background: isWinner ? 'linear-gradient(135deg, #1a9ef4, #1a6fc4)' : '#94a3b8' }}>
-                                  {candidate.name[0]?.toUpperCase()}
-                                </div>
+                                {candidate.image_url ? (
+                                  <img src={candidate.image_url} alt={candidate.name}
+                                    className="w-8 h-8 rounded-full object-cover shrink-0"
+                                    style={{ border: '2px solid #e8eef6' }} />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
+                                    style={{ background: isWinner ? 'linear-gradient(135deg, #1a9ef4, #1a6fc4)' : '#94a3b8' }}>
+                                    {candidate.name[0]?.toUpperCase()}
+                                  </div>
+                                )}
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="text-sm font-semibold" style={{ color: '#0f172a' }}>{candidate.name}</span>
@@ -408,10 +493,10 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                           )
                         })}
                       </div>
-                    </div>
-                  )
-                })
-              )}
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
 
@@ -440,7 +525,6 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                 />
               </div>
 
-              {/* Danger zone */}
               <div className="rounded-2xl p-5" style={{ background: '#fff7f7', border: '2px solid #fee2e2' }}>
                 <h3 className="font-bold text-sm mb-1" style={{ color: '#991b1b' }}>Danger Zone</h3>
                 <p className="text-xs mb-4" style={{ color: '#b91c1c' }}>
