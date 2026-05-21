@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth, getDisplayName } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import ElectionVoting from './ElectionVoting'
 import ElectionAdminPortal from './ElectionAdminPortal'
-import { Trophy, Medal, Star, ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 
 interface Stats {
   candidates: number
@@ -23,7 +23,20 @@ interface Candidate {
   status: string
 }
 
-// ── Avatar ─────────────────────────────────────────────────────────────────────
+const POSITIONS = [
+  'President',
+  'Vice President',
+  'Secretary General',
+  'Financial Secretary',
+  'Assistant Secretary General',
+  'Treasurer',
+  'Director of Welfare',
+  'Director of ICT & Research',
+  'Director of Socials',
+  'Director of Protocol (PRO)',
+  'Director of Sports',
+]
+
 function CandidateAvatar({ name, imageUrl, size = 56 }: { name: string; imageUrl?: string; size?: number }) {
   const [err, setErr] = useState(false)
   const initials = (name || 'U').split(' ').filter(Boolean).slice(0, 2).map((n: string) => n[0]).join('').toUpperCase()
@@ -41,49 +54,83 @@ function CandidateAvatar({ name, imageUrl, size = 56 }: { name: string; imageUrl
   )
 }
 
-// ── Winners Results Page ───────────────────────────────────────────────────────
+// ── Results Not Available ──────────────────────────────────────────────────────
+function ResultsNotAvailable({ electionOpen, onBack }: { electionOpen: boolean; onBack: () => void }) {
+  return (
+    <div className="election-portal-bg min-h-screen flex items-center justify-center px-4">
+      <div style={{ textAlign: 'center', maxWidth: 400 }}>
+        <div style={{ fontSize: 64, marginBottom: 16 }}>{electionOpen ? '🗳️' : '⏳'}</div>
+        <h2 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: '0 0 8px' }}>
+          {electionOpen ? 'Voting in Progress' : 'Results Not Available Yet'}
+        </h2>
+        <p style={{ fontSize: 14, color: '#64748b', lineHeight: 1.6, marginBottom: 24 }}>
+          {electionOpen
+            ? 'The election is currently open. Results will be published after voting closes.'
+            : 'Voting has not started yet, or the results have not been released. Please check back later.'}
+        </p>
+        <button onClick={onBack}
+          style={{ background: 'none', border: '1px solid #cbd5e1', borderRadius: 99, padding: '8px 24px', fontSize: 13, color: '#64748b', cursor: 'pointer' }}>
+          ← Back to Election Portal
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Final Results Page ─────────────────────────────────────────────────────────
 function ElectionResults({ onBack }: { onBack: () => void }) {
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [voteCounts, setVoteCounts] = useState<Record<string, number>>({})
+  const [totalVoters, setTotalVoters] = useState(0)
   const [loading, setLoading] = useState(true)
   const [expandedPositions, setExpandedPositions] = useState<Record<string, boolean>>({})
+  const realtimeRef = useRef<any>(null)
 
-  useEffect(() => { fetchResults() }, [])
+  useEffect(() => {
+    fetchResults()
+    const channel = supabase
+      .channel('results-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'election_votes' }, fetchResults)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'election_submissions' }, fetchResults)
+      .subscribe()
+    realtimeRef.current = channel
+    return () => { supabase.removeChannel(channel) }
+  }, [])
 
   const fetchResults = async () => {
     setLoading(true)
-    const [{ data: cands }, { data: votes }] = await Promise.all([
-      supabase.from('election_candidates').select('*').eq('status', 'active').order('position'),
+    const [{ data: cands }, { data: votes }, { data: subs }] = await Promise.all([
+      supabase.from('election_candidates').select('*').order('created_at'),
       supabase.from('election_votes').select('candidate_id'),
+      supabase.from('election_submissions').select('id'),
     ])
-
     const counts: Record<string, number> = {}
-    ;(votes || []).forEach((v: any) => {
-      counts[v.candidate_id] = (counts[v.candidate_id] || 0) + 1
-    })
-
+    ;(votes || []).forEach((v: any) => { counts[v.candidate_id] = (counts[v.candidate_id] || 0) + 1 })
     setCandidates(cands || [])
     setVoteCounts(counts)
-
-    // Default all positions expanded
-    const positions = [...new Set((cands || []).map((c: any) => c.position))]
+    setTotalVoters((subs || []).length)
     const expanded: Record<string, boolean> = {}
-    positions.forEach(p => { expanded[p] = true })
+    POSITIONS.forEach(p => { expanded[p] = true })
     setExpandedPositions(expanded)
     setLoading(false)
   }
 
-  const positions = [...new Set(candidates.map(c => c.position))]
+  const activePositions = POSITIONS.filter(p => (candidates || []).some(c => c.position === p))
+
+  const activeCandidatesForPosition = (position: string) =>
+    candidates.filter(c => c.position === position && c.status === 'active')
 
   const getWinnerForPosition = (position: string) => {
-    const positionCandidates = candidates.filter(c => c.position === position)
-    if (positionCandidates.length === 0) return null
-    return positionCandidates.reduce((winner, c) =>
-      (voteCounts[c.id] || 0) > (voteCounts[winner.id] || 0) ? c : winner
-    )
+    const eligible = activeCandidatesForPosition(position)
+    if (eligible.length === 0) return null
+    const sorted = [...eligible].sort((a, b) => (voteCounts[b.id] || 0) - (voteCounts[a.id] || 0))
+    const top = sorted[0]
+    const topVotes = voteCounts[top.id] || 0
+    const runnerVotes = voteCounts[sorted[1]?.id] || 0
+    return topVotes > 0 && topVotes > runnerVotes ? top : null
   }
 
-  const totalVotes = Object.values(voteCounts).reduce((a, b) => a + b, 0)
+  const totalVotesCast = Object.values(voteCounts).reduce((a, b) => a + b, 0)
 
   if (loading) return (
     <div className="election-portal-bg min-h-screen flex items-center justify-center">
@@ -98,20 +145,28 @@ function ElectionResults({ onBack }: { onBack: () => void }) {
     <div className="election-portal-bg min-h-screen px-4 py-8">
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes winner-pulse {
+        @keyframes winner-glow {
           0%, 100% { box-shadow: 0 0 0 0 rgba(26,158,244,0.4), 0 8px 32px rgba(26,158,244,0.25); }
-          50%       { box-shadow: 0 0 0 8px rgba(26,158,244,0), 0 8px 32px rgba(26,158,244,0.4); }
+          50%       { box-shadow: 0 0 0 10px rgba(26,158,244,0), 0 8px 32px rgba(26,158,244,0.45); }
+        }
+        @keyframes winner-shimmer {
+          0%   { transform: translateX(-100%); }
+          100% { transform: translateX(200%); }
         }
         @keyframes trophy-bounce {
           0%, 100% { transform: translateY(0); }
-          50%       { transform: translateY(-6px); }
+          50%       { transform: translateY(-8px); }
+        }
+        @keyframes winner-badge-pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%       { opacity: 0.85; transform: scale(1.07); }
         }
         .winner-card {
           background: linear-gradient(135deg, #e8f4ff 0%, #dbeeff 100%);
-          border: 2px solid #1a9ef4;
-          border-radius: 14px;
-          padding: 16px;
-          animation: winner-pulse 2s ease-in-out infinite;
+          border: 2.5px solid #1a9ef4;
+          border-radius: 16px;
+          padding: 18px;
+          animation: winner-glow 2.2s ease-in-out infinite;
           position: relative;
           overflow: hidden;
         }
@@ -119,67 +174,38 @@ function ElectionResults({ onBack }: { onBack: () => void }) {
           content: '';
           position: absolute;
           inset: 0;
-          background: linear-gradient(105deg, transparent 40%, rgba(26,158,244,0.07) 50%, transparent 60%);
-          animation: shimmer-sweep 2.5s ease-in-out infinite;
+          background: linear-gradient(105deg, transparent 40%, rgba(26,158,244,0.08) 50%, transparent 60%);
+          animation: winner-shimmer 2.5s ease-in-out infinite;
         }
-        @keyframes shimmer-sweep {
-          0%   { transform: translateX(-100%); }
-          100% { transform: translateX(200%); }
-        }
+        .winner-badge { animation: winner-badge-pulse 1.8s ease-in-out infinite; }
         .runner-card {
           background: #f8fafc;
           border: 1px solid #e2e8f0;
           border-radius: 12px;
           padding: 12px 14px;
-          opacity: 0.85;
+          opacity: 0.88;
         }
-        .vote-bar-track {
-          height: 6px;
-          background: #e2e8f0;
-          border-radius: 99px;
-          overflow: hidden;
-          margin-top: 6px;
-        }
-        .vote-bar-fill {
-          height: 100%;
-          border-radius: 99px;
-          transition: width 1s ease;
-        }
+        .vote-bar-track { height: 6px; background: #e2e8f0; border-radius: 99px; overflow: hidden; margin-top: 6px; }
+        .vote-bar-fill { height: 100%; border-radius: 99px; transition: width 1s ease; }
         .trophy-icon { animation: trophy-bounce 2s ease-in-out infinite; display: inline-block; }
         .results-card {
-          background: white;
-          border-radius: 18px;
+          background: white; border-radius: 18px;
           box-shadow: 0 4px 24px rgba(0,0,0,0.08);
-          overflow: hidden;
-          max-width: 540px;
-          margin: 0 auto 16px;
+          overflow: hidden; max-width: 540px; margin: 0 auto 16px;
         }
         .position-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 14px 18px;
-          background: #f0f7ff;
-          border-bottom: 1px solid #dbeeff;
-          cursor: pointer;
-          user-select: none;
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 14px 18px; background: #f0f7ff;
+          border-bottom: 1px solid #dbeeff; cursor: pointer; user-select: none;
         }
         .position-title {
-          font-weight: 700;
-          font-size: 15px;
-          color: #0f172a;
-          display: flex;
-          align-items: center;
-          gap: 8px;
+          font-weight: 700; font-size: 15px; color: #0f172a;
+          display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
         }
         .winner-name-badge {
-          font-size: 11px;
-          font-weight: 600;
-          color: #1a6fc4;
-          background: #dbeeff;
-          border: 1px solid #bfdbfe;
-          border-radius: 99px;
-          padding: 2px 8px;
+          font-size: 11px; font-weight: 600; color: #1a6fc4;
+          background: #dbeeff; border: 1px solid #bfdbfe;
+          border-radius: 99px; padding: 2px 8px;
         }
         .position-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
       `}</style>
@@ -187,125 +213,126 @@ function ElectionResults({ onBack }: { onBack: () => void }) {
       {/* Header */}
       <div style={{ maxWidth: 540, margin: '0 auto 24px', textAlign: 'center' }}>
         <div style={{ fontSize: 48, marginBottom: 8 }} className="trophy-icon">🏆</div>
-        <h1 style={{ fontSize: 26, fontWeight: 800, color: '#0f172a', margin: '0 0 6px' }}>
-          Election Results
-        </h1>
-        <p style={{ fontSize: 14, color: '#64748b', margin: '0 0 10px' }}>
+        <h1 style={{ fontSize: 26, fontWeight: 800, color: '#0f172a', margin: '0 0 6px' }}>Election Results</h1>
+        <p style={{ fontSize: 14, color: '#64748b', margin: '0 0 14px' }}>
           Official results for NACSFUTO 2026/2027 elections
         </p>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 99, padding: '4px 14px', fontSize: 12, color: '#16a34a', fontWeight: 600 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#16a34a', display: 'inline-block' }} />
-          {totalVotes} Total Votes Cast · {positions.length} Positions
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 99, padding: '5px 14px', fontSize: 12, color: '#16a34a', fontWeight: 600 }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#16a34a', display: 'inline-block' }} />
+            {totalVoters} Total Voters
+          </div>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 99, padding: '5px 14px', fontSize: 12, color: '#1a6fc4', fontWeight: 600 }}>
+            🗳️ {totalVotesCast} Votes Cast · {activePositions.length} Positions
+          </div>
         </div>
       </div>
 
-      {/* Position result cards */}
-      {positions.map(position => {
-        const positionCandidates = candidates
-          .filter(c => c.position === position)
+      {/* Position cards — in POSITIONS order (same as admin dashboard) */}
+      {activePositions.map((position, posIdx) => {
+        const allCands = candidates.filter(c => c.position === position)
+        const activeSorted = [...activeCandidatesForPosition(position)]
           .sort((a, b) => (voteCounts[b.id] || 0) - (voteCounts[a.id] || 0))
-
-        const winner = positionCandidates[0]
-        const maxVotes = Math.max(...positionCandidates.map(c => voteCounts[c.id] || 0), 1)
+        const ineligible = allCands.filter(c => c.status !== 'active')
+        const winner = getWinnerForPosition(position)
+        const positionTotal = activeSorted.reduce((s, c) => s + (voteCounts[c.id] || 0), 0)
+        const maxVotes = Math.max(...activeSorted.map(c => voteCounts[c.id] || 0), 1)
         const isExpanded = expandedPositions[position] !== false
 
         return (
           <div key={position} className="results-card">
-            {/* Position header — clickable to expand/collapse */}
             <div className="position-header"
               onClick={() => setExpandedPositions(prev => ({ ...prev, [position]: !prev[position] }))}>
               <div className="position-title">
-                <Trophy style={{ width: 16, height: 16, color: '#1a9ef4' }} />
+                <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#1a9ef4', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+                  {posIdx + 1}
+                </div>
                 {position}
                 {winner && <span className="winner-name-badge">🥇 {winner.name}</span>}
               </div>
-              {isExpanded
-                ? <ChevronUp style={{ width: 16, height: 16, color: '#64748b' }} />
-                : <ChevronDown style={{ width: 16, height: 16, color: '#64748b' }} />
-              }
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 500 }}>{positionTotal} votes</span>
+                {isExpanded
+                  ? <ChevronUp style={{ width: 16, height: 16, color: '#64748b' }} />
+                  : <ChevronDown style={{ width: 16, height: 16, color: '#64748b' }} />}
+              </div>
             </div>
 
             {isExpanded && (
               <div className="position-body">
-                {positionCandidates.map((candidate, idx) => {
-                  const votes = voteCounts[candidate.id] || 0
-                  const isWinner = candidate.id === winner?.id
-                  const percentage = maxVotes > 0 ? Math.round((votes / maxVotes) * 100) : 0
-                  const totalPct = totalVotes > 0 ? ((votes / totalVotes) * 100).toFixed(1) : '0'
+                {activeSorted.length === 0 ? (
+                  <p style={{ fontSize: 12, color: '#cbd5e1' }}>No active candidates</p>
+                ) : (
+                  activeSorted.map((candidate, idx) => {
+                    const votes = voteCounts[candidate.id] || 0
+                    const isWinner = winner?.id === candidate.id
+                    const percentage = maxVotes > 0 ? Math.round((votes / maxVotes) * 100) : 0
+                    const totalPct = positionTotal > 0 ? ((votes / positionTotal) * 100).toFixed(1) : '0'
 
-                  return isWinner ? (
-                    // ── Winner card ── (large, glowing, fully highlighted)
-                    <div key={candidate.id} className="winner-card">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 14, position: 'relative', zIndex: 1 }}>
-                        <div style={{ position: 'relative' }}>
-                          <CandidateAvatar name={candidate.name} imageUrl={candidate.image_url} size={64} />
-                          <div style={{
-                            position: 'absolute', bottom: -4, right: -4,
-                            width: 22, height: 22, borderRadius: '50%',
-                            background: '#fbbf24', border: '2px solid white',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontSize: 11, fontWeight: 700,
-                          }}>🥇</div>
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 2 }}>
-                            <span style={{ fontWeight: 800, fontSize: 16, color: '#0f172a' }}>{candidate.name}</span>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: '#1a6fc4', background: '#dbeeff', borderRadius: 99, padding: '1px 7px', border: '1px solid #bfdbfe', textTransform: 'uppercase', letterSpacing: '0.05em' }}>WINNER</span>
+                    return isWinner ? (
+                      <div key={candidate.id} className="winner-card">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 14, position: 'relative', zIndex: 1 }}>
+                          <div style={{ position: 'relative' }}>
+                            <CandidateAvatar name={candidate.name} imageUrl={candidate.image_url} size={64} />
+                            <div style={{ position: 'absolute', bottom: -4, right: -4, width: 24, height: 24, borderRadius: '50%', background: '#fbbf24', border: '2px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}>🥇</div>
                           </div>
-                          <div style={{ fontSize: 13, color: '#1a6fc4', fontWeight: 600, marginBottom: 6 }}>
-                            {votes} vote{votes !== 1 ? 's' : ''} — {totalPct}% of all votes
-                          </div>
-                          <div className="vote-bar-track">
-                            <div className="vote-bar-fill" style={{ width: `${percentage}%`, background: 'linear-gradient(90deg, #1a9ef4, #1a6fc4)' }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 3 }}>
+                              <span style={{ fontWeight: 800, fontSize: 16, color: '#0f172a' }}>{candidate.name}</span>
+                              <span className="winner-badge" style={{ fontSize: 10, fontWeight: 700, color: '#1a6fc4', background: '#dbeeff', borderRadius: 99, padding: '2px 8px', border: '1px solid #bfdbfe', textTransform: 'uppercase', letterSpacing: '0.05em' }}>WINNER</span>
+                            </div>
+                            <div style={{ fontSize: 13, color: '#1a6fc4', fontWeight: 700, marginBottom: 6 }}>
+                              {votes} vote{votes !== 1 ? 's' : ''} — {totalPct}% of position votes
+                            </div>
+                            <div className="vote-bar-track">
+                              <div className="vote-bar-fill" style={{ width: `${percentage}%`, background: 'linear-gradient(90deg, #1a9ef4, #1a6fc4)' }} />
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ) : (
-                    // ── Runner-up / other candidates ──
-                    <div key={candidate.id} className="runner-card">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <div style={{ position: 'relative' }}>
-                          <CandidateAvatar name={candidate.name} imageUrl={candidate.image_url} size={44} />
-                          {idx === 1 && (
-                            <div style={{
-                              position: 'absolute', bottom: -3, right: -3,
-                              width: 18, height: 18, borderRadius: '50%',
-                              background: '#94a3b8', border: '2px solid white',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: 9,
-                            }}>🥈</div>
-                          )}
-                          {idx === 2 && (
-                            <div style={{
-                              position: 'absolute', bottom: -3, right: -3,
-                              width: 18, height: 18, borderRadius: '50%',
-                              background: '#cd7c2f', border: '2px solid white',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: 9,
-                            }}>🥉</div>
-                          )}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontWeight: 600, fontSize: 14, color: '#334155', marginBottom: 2 }}>{candidate.name}</div>
-                          <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>
-                            {votes} vote{votes !== 1 ? 's' : ''} — {totalPct}%
+                    ) : (
+                      <div key={candidate.id} className="runner-card">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div style={{ position: 'relative' }}>
+                            <CandidateAvatar name={candidate.name} imageUrl={candidate.image_url} size={44} />
+                            {idx === 1 && <div style={{ position: 'absolute', bottom: -3, right: -3, width: 18, height: 18, borderRadius: '50%', background: '#94a3b8', border: '2px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9 }}>🥈</div>}
+                            {idx === 2 && <div style={{ position: 'absolute', bottom: -3, right: -3, width: 18, height: 18, borderRadius: '50%', background: '#cd7c2f', border: '2px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9 }}>🥉</div>}
                           </div>
-                          <div className="vote-bar-track">
-                            <div className="vote-bar-fill" style={{ width: `${percentage}%`, background: '#cbd5e1' }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: 14, color: '#334155', marginBottom: 2 }}>{candidate.name}</div>
+                            <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4 }}>
+                              {votes} vote{votes !== 1 ? 's' : ''} — {totalPct}%
+                            </div>
+                            <div className="vote-bar-track">
+                              <div className="vote-bar-fill" style={{ width: `${percentage}%`, background: '#cbd5e1' }} />
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })
+                )}
+
+                {ineligible.length > 0 && (
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed #e2e8f0' }}>
+                    <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 6 }}>Not counted:</div>
+                    {ineligible.map(c => (
+                      <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', opacity: 0.5 }}>
+                        <CandidateAvatar name={c.name} imageUrl={c.image_url} size={28} />
+                        <span style={{ fontSize: 12, color: '#94a3b8', flex: 1 }}>{c.name}</span>
+                        <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 99, background: c.status === 'disqualified' ? '#fef3c7' : '#fee2e2', color: c.status === 'disqualified' ? '#d97706' : '#dc2626', fontWeight: 600 }}>
+                          {c.status === 'disqualified' ? '❌ Disqualified' : '🚫 Suspended'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
         )
       })}
 
-      {/* Back button */}
       <div style={{ maxWidth: 540, margin: '16px auto 0', textAlign: 'center' }}>
         <button onClick={onBack}
           style={{ background: 'none', border: '1px solid #cbd5e1', borderRadius: 99, padding: '8px 24px', fontSize: 13, color: '#64748b', cursor: 'pointer', transition: 'all 0.2s' }}
@@ -358,14 +385,15 @@ export default function ElectionPortal() {
 
   if (view === 'voting') return <ElectionVoting onBack={() => setView('landing')} settings={stats} />
   if (view === 'admin') return <ElectionAdminPortal onBack={() => setView('landing')} />
-  if (view === 'results') return <ElectionResults onBack={() => setView('landing')} />
+  if (view === 'results') {
+    if (!stats.resultsVisible) return <ResultsNotAvailable electionOpen={stats.electionOpen} onBack={() => setView('landing')} />
+    return <ElectionResults onBack={() => setView('landing')} />
+  }
 
-  // ── Landing page ──
   return (
     <div className="election-portal-bg min-h-screen flex flex-col items-center justify-center px-4 py-8">
       <div className="election-card w-full max-w-md">
 
-        {/* Header */}
         <div className="text-center pb-6" style={{ borderBottom: '1px solid #e8eef6' }}>
           <div className="flex justify-center mb-4">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shadow-md"
@@ -378,8 +406,6 @@ export default function ElectionPortal() {
             <span style={{ color: '#1a9ef4' }}>Election</span>
           </h1>
           <p className="text-sm" style={{ color: '#64748b' }}>Sign in with your NACSFUTO account to vote</p>
-
-          {/* Status badge */}
           <div className="flex justify-center mt-4">
             {loadingStats ? (
               <div className="election-badge-loading" />
@@ -392,7 +418,6 @@ export default function ElectionPortal() {
           </div>
         </div>
 
-        {/* Stats row */}
         <div className="election-stats-row">
           <div className="election-stat">
             <div className="stat-value" style={{ color: '#1a9ef4' }}>{loadingStats ? '—' : stats.candidates}</div>
@@ -410,7 +435,6 @@ export default function ElectionPortal() {
           </div>
         </div>
 
-        {/* Member info box */}
         <div className="election-info-box">
           <div className="flex items-start gap-3">
             <div className="shrink-0 mt-0.5">
@@ -431,7 +455,6 @@ export default function ElectionPortal() {
           </div>
         </div>
 
-        {/* Features list */}
         <div className="px-6 py-4 space-y-3">
           {[
             { emoji: '🏛️', text: `${loadingStats ? '11' : stats.positions || 11} executive positions to vote on` },
@@ -445,50 +468,28 @@ export default function ElectionPortal() {
           ))}
         </div>
 
-        {/* CTA buttons */}
         <div className="px-6 pb-6 space-y-3">
-          {/* Vote button */}
           <button onClick={handleCastVote} disabled={authLoading} className="election-cta-btn">
             {authLoading ? 'Loading...' :
-              user
-                ? profile?.is_admin ? 'Open Admin Dashboard →' : 'Cast Your Vote →'
-                : 'Cast Your Vote →'}
+              user ? profile?.is_admin ? 'Open Admin Dashboard →' : 'Cast Your Vote →' : 'Cast Your Vote →'}
           </button>
 
-          {/* ── Show Results button — only visible when election is closed AND resultsVisible is true ── */}
-          {!loadingStats && !stats.electionOpen && stats.resultsVisible && (
-            <button
-              onClick={() => setView('results')}
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                padding: '12px 0',
-                borderRadius: 12,
-                border: '2px solid #fbbf24',
-                background: 'linear-gradient(135deg, #fffbeb, #fef3c7)',
-                color: '#92400e',
-                fontWeight: 700,
-                fontSize: 15,
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-              }}
-              onMouseEnter={e => {
-                const el = e.currentTarget as HTMLElement
-                el.style.background = 'linear-gradient(135deg, #fef3c7, #fde68a)'
-                el.style.transform = 'translateY(-1px)'
-                el.style.boxShadow = '0 4px 16px rgba(251,191,36,0.35)'
-              }}
-              onMouseLeave={e => {
-                const el = e.currentTarget as HTMLElement
-                el.style.background = 'linear-gradient(135deg, #fffbeb, #fef3c7)'
-                el.style.transform = ''
-                el.style.boxShadow = ''
-              }}>
+          {/* Show Results — only when resultsVisible is ON */}
+          {!loadingStats && stats.resultsVisible && (
+            <button onClick={() => setView('results')}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 0', borderRadius: 12, border: '2px solid #fbbf24', background: 'linear-gradient(135deg, #fffbeb, #fef3c7)', color: '#92400e', fontWeight: 700, fontSize: 15, cursor: 'pointer', transition: 'all 0.2s' }}
+              onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'linear-gradient(135deg, #fef3c7, #fde68a)'; el.style.transform = 'translateY(-1px)'; el.style.boxShadow = '0 4px 16px rgba(251,191,36,0.35)' }}
+              onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'linear-gradient(135deg, #fffbeb, #fef3c7)'; el.style.transform = ''; el.style.boxShadow = '' }}>
               <span style={{ fontSize: 20 }}>🏆</span>
               View Election Winners
+            </button>
+          )}
+
+          {/* Status message when results not yet published */}
+          {!loadingStats && !stats.resultsVisible && (
+            <button onClick={() => setView('results')}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 0', borderRadius: 12, border: '1px solid #e8eef6', background: '#f8fafc', color: '#94a3b8', fontWeight: 500, fontSize: 13, cursor: 'pointer' }}>
+              {stats.electionOpen ? '🗳️ Voting in progress — results pending' : '⏳ Results not yet available'}
             </button>
           )}
 
