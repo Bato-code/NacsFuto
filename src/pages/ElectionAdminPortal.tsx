@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth, getDisplayName } from '../contexts/AuthContext'
 
 interface Candidate { id: string; name: string; position: string; image_url?: string; status: string; sort_order?: number }
-interface ElectionSettings { election_open: boolean; results_visible: boolean; allow_changes: boolean }
+interface ElectionSettings { election_open: boolean; results_visible: boolean; allow_changes: boolean; live_count_visible: boolean }
 
 type AdminView = 'overview' | 'candidates' | 'results' | 'final' | 'settings'
 
@@ -54,7 +54,7 @@ function StatCard({ value, label, color = '#1a9ef4' }: { value: string | number;
 export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) {
   const { profile } = useAuth()
   const [activeView, setActiveView] = useState<AdminView>('overview')
-  const [settings, setSettings] = useState<ElectionSettings>({ election_open: false, results_visible: false, allow_changes: true })
+  const [settings, setSettings] = useState<ElectionSettings>({ election_open: false, results_visible: false, allow_changes: true, live_count_visible: false })
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [votes, setVotes] = useState<any[]>([])
   const [submissions, setSubmissions] = useState<any[]>([])
@@ -76,7 +76,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
       supabase.from('election_votes').select('*'),
       supabase.from('election_submissions').select('*'),
     ])
-    if (s) setSettings(s)
+    if (s) setSettings({ ...s, live_count_visible: s.live_count_visible ?? false })
     setCandidates(c || [])
     setVotes(v || [])
     setSubmissions(sub || [])
@@ -267,6 +267,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                 </div>
                 {[
                   { key: 'election_open' as const, label: 'Election Open', desc: 'Allow members to vote' },
+                  { key: 'live_count_visible' as const, label: 'Show Live Count', desc: 'Show real-time vote totals and per-candidate counts to voters' },
                   { key: 'results_visible' as const, label: 'Show Final Result', desc: 'Publish winners to voters — shows animated results page' },
                   { key: 'allow_changes' as const, label: 'Allow Vote Changes', desc: 'Before final submission' },
                 ].map(({ key, label, desc }) => (
@@ -678,6 +679,12 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                   onToggle={() => updateSetting('election_open', !settings.election_open)}
                   label="Election Open"
                   description="Allow registered members to cast their vote"
+                />
+                <ToggleSwitch
+                  value={settings.live_count_visible}
+                  onToggle={() => updateSetting('live_count_visible', !settings.live_count_visible)}
+                  label="Show Live Count to Voters"
+                  description="Show real-time vote totals and per-candidate counts inside the voting interface"
                 />
                 <ToggleSwitch
                   value={settings.results_visible}
