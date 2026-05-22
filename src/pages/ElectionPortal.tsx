@@ -4,7 +4,7 @@ import { useAuth, getDisplayName } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import ElectionVoting from './ElectionVoting'
 import ElectionAdminPortal from './ElectionAdminPortal'
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp, BarChart2 } from 'lucide-react'
 
 interface Stats {
   candidates: number
@@ -229,7 +229,7 @@ function ElectionResults({ onBack }: { onBack: () => void }) {
         </div>
       </div>
 
-      {/* Position cards — in POSITIONS order (same as admin dashboard) */}
+      {/* Position cards */}
       {activePositions.map((position, posIdx) => {
         const allCands = candidates.filter(c => c.position === position)
         const activeSorted = [...activeCandidatesForPosition(position)]
@@ -355,9 +355,25 @@ export default function ElectionPortal() {
     electionOpen: false, resultsVisible: false, allowChanges: true, liveCountVisible: false
   })
   const [loadingStats, setLoadingStats] = useState(true)
+  const [hasVoted, setHasVoted] = useState(false)
   const [view, setView] = useState<'landing' | 'voting' | 'admin' | 'results'>('landing')
 
   useEffect(() => { fetchStats() }, [])
+
+  // Check if the current user has already voted
+  useEffect(() => {
+    if (user) checkIfVoted()
+  }, [user])
+
+  const checkIfVoted = async () => {
+    if (!user) return
+    const { data } = await supabase
+      .from('election_submissions')
+      .select('id')
+      .eq('voter_id', user.id)
+      .maybeSingle()
+    setHasVoted(!!data)
+  }
 
   const fetchStats = async () => {
     setLoadingStats(true)
@@ -385,12 +401,21 @@ export default function ElectionPortal() {
     else setView('voting')
   }
 
-  if (view === 'voting') return <ElectionVoting onBack={() => setView('landing')} settings={stats} />
+  if (view === 'voting') return (
+    <ElectionVoting
+      onBack={() => { setView('landing'); checkIfVoted() }}
+      settings={stats}
+    />
+  )
   if (view === 'admin') return <ElectionAdminPortal onBack={() => setView('landing')} />
   if (view === 'results') {
     if (!stats.resultsVisible) return <ResultsNotAvailable electionOpen={stats.electionOpen} onBack={() => setView('landing')} />
     return <ElectionResults onBack={() => setView('landing')} />
   }
+
+  // Determine button label and action for the main CTA
+  const isAdmin = profile?.is_admin
+  const userHasVoted = user && !isAdmin && hasVoted
 
   return (
     <div className="election-portal-bg min-h-screen flex flex-col items-center justify-center px-4 py-8">
@@ -471,10 +496,46 @@ export default function ElectionPortal() {
         </div>
 
         <div className="px-6 pb-6 space-y-3">
-          <button onClick={handleCastVote} disabled={authLoading} className="election-cta-btn">
-            {authLoading ? 'Loading...' :
-              user ? profile?.is_admin ? 'Open Admin Dashboard →' : 'Cast Your Vote →' : 'Cast Your Vote →'}
-          </button>
+
+          {/* Main CTA — changes based on whether user has voted */}
+          {userHasVoted ? (
+            /* User has already voted → show "Check Election Live Count" */
+            <button
+              onClick={handleCastVote}
+              disabled={authLoading}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                padding: '13px 0', borderRadius: 14, border: 'none',
+                background: 'linear-gradient(135deg, #1a9ef4, #1a6fc4)',
+                color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer',
+                boxShadow: '0 4px 18px rgba(26,110,196,0.3)',
+                transition: 'transform 0.15s, box-shadow 0.15s',
+              }}
+              onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.transform = 'translateY(-1px)'; el.style.boxShadow = '0 6px 24px rgba(26,110,196,0.4)' }}
+              onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.transform = ''; el.style.boxShadow = '0 4px 18px rgba(26,110,196,0.3)' }}
+            >
+              <BarChart2 style={{ width: 18, height: 18 }} />
+              {authLoading ? 'Loading...' : 'Check Election Live Count →'}
+            </button>
+          ) : (
+            /* Default CTA */
+            <button onClick={handleCastVote} disabled={authLoading} className="election-cta-btn">
+              {authLoading ? 'Loading...' :
+                user ? isAdmin ? 'Open Admin Dashboard →' : 'Cast Your Vote →' : 'Cast Your Vote →'}
+            </button>
+          )}
+
+          {/* Voted badge — shown when user has voted */}
+          {userHasVoted && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              padding: '8px 0', borderRadius: 99,
+              background: '#f0fdf4', border: '1px solid #bbf7d0',
+              fontSize: 12, color: '#16a34a', fontWeight: 600,
+            }}>
+              ✅ You have already cast your vote
+            </div>
+          )}
 
           {/* Show Results — only when resultsVisible is ON */}
           {!loadingStats && stats.resultsVisible && (
