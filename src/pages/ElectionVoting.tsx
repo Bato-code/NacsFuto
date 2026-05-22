@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ArrowLeft, CheckCircle, ChevronDown, ChevronUp, Lock, Ban } from 'lucide-react'
+import { ArrowLeft, CheckCircle, ChevronDown, ChevronUp, Lock, Ban, BarChart2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth, getDisplayName } from '../contexts/AuthContext'
 
@@ -55,8 +55,6 @@ export default function ElectionVoting({ onBack, settings }: {
   const [animating, setAnimating] = useState<string | null>(null)
   const realtimeRef = useRef<any>(null)
 
-  // liveCountVisible controls vote bars/counts inside the voting interface
-  // resultsVisible controls access to the separate Final Results page
   const showLiveCount = settings.liveCountVisible
 
   useEffect(() => {
@@ -110,7 +108,6 @@ export default function ElectionVoting({ onBack, settings }: {
       setHasSubmitted(!!submission)
     }
 
-    // Fetch live counts if either live count or final results are enabled
     if (settings.liveCountVisible || settings.resultsVisible) {
       await fetchLiveCounts()
       setupRealtime()
@@ -130,7 +127,6 @@ export default function ElectionVoting({ onBack, settings }: {
     setTimeout(() => setAnimating(null), 600)
 
     if (alreadyVoted) {
-      // Deselect: remove this candidate's vote
       await supabase.from('election_votes').delete()
         .eq('voter_id', user.id).eq('position', position).eq('candidate_id', candidateId)
       setMyVotes(prev => {
@@ -139,7 +135,6 @@ export default function ElectionVoting({ onBack, settings }: {
         return next
       })
     } else {
-      // Select: remove any existing vote for this position first, then insert new one
       if (hasExistingVote) {
         await supabase.from('election_votes').delete()
           .eq('voter_id', user.id).eq('position', position)
@@ -180,6 +175,26 @@ export default function ElectionVoting({ onBack, settings }: {
   const positionsWithCandidates = POSITIONS.filter(p => candidates.some(c => c.position === p))
   const totalVotedPositions = Object.keys(myVotes).filter(p => myVotes[p].size > 0).length
 
+  // ─── Shared top bar ───────────────────────────────────────────────────────
+  const TopBar = () => (
+    <div className="sticky top-0 z-10" style={{ background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #e8eef6' }}>
+      <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between">
+        <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium" style={{ color: '#64748b' }}>
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <div className="text-center">
+          <div className="font-bold text-sm" style={{ color: '#0f172a' }}>
+            NACSFUTO <span style={{ color: '#1a9ef4' }}>Election</span>
+          </div>
+        </div>
+        <div className="text-xs font-medium" style={{ color: '#1a9ef4' }}>
+          {getDisplayName(profile)}
+        </div>
+      </div>
+    </div>
+  )
+
+  // ─── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="election-portal-bg min-h-screen flex items-center justify-center">
@@ -192,21 +207,154 @@ export default function ElectionVoting({ onBack, settings }: {
     )
   }
 
-  if (justSubmitted) {
+  // ─── POST-SUBMISSION VIEW (justSubmitted or returning after submit) ────────
+  // Shows ONLY the live count — no checkboxes, no "who you voted for"
+  if (hasSubmitted) {
     return (
-      <div className="election-portal-bg min-h-screen flex items-center justify-center px-4">
-        <div className="election-card w-full max-w-md p-8 text-center">
-          <div className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5"
-            style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}>
-            <CheckCircle className="w-10 h-10 text-white" />
+      <div className="election-portal-bg min-h-screen">
+        <TopBar />
+        <div className="max-w-2xl mx-auto px-4 py-6">
+
+          {/* Success banner */}
+          <div className="rounded-2xl p-6 mb-6 text-center"
+            style={{ background: 'linear-gradient(135deg, #d1fae5, #a7f3d0)', border: '1px solid #6ee7b7' }}>
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3"
+              style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}>
+              <CheckCircle className="w-8 h-8 text-white" />
+            </div>
+            <h2 className="text-xl font-bold mb-1" style={{ color: '#065f46' }}>
+              {justSubmitted ? 'Ballot Submitted!' : 'Ballot Already Submitted'}
+            </h2>
+            <p className="text-sm" style={{ color: '#047857' }}>
+              Your vote has been recorded securely. Thank you for participating in the NACSFUTO elections.
+            </p>
           </div>
-          <h2 className="text-2xl font-bold mb-2" style={{ color: '#0f172a' }}>Ballot Submitted!</h2>
-          <p className="text-sm mb-6" style={{ color: '#64748b' }}>
-            Your vote has been recorded securely. Thank you for participating in the NACSFUTO elections.
-          </p>
-          {showLiveCount && (
-            <button onClick={() => setJustSubmitted(false)} className="election-cta-btn mb-3">View Live Count</button>
+
+          {/* Live count section — only shown when liveCountVisible is ON */}
+          {showLiveCount ? (
+            <>
+              {/* Stats summary bar */}
+              <div className="rounded-2xl p-4 mb-5 flex items-center justify-between gap-4"
+                style={{ background: 'linear-gradient(135deg, #eff6ff, #dbeafe)', border: '1px solid #bfdbfe' }}>
+                <div className="text-center flex-1">
+                  <div className="text-2xl font-bold" style={{ color: '#1a6fc4' }}>{totalVoters}</div>
+                  <div className="text-xs font-semibold mt-0.5" style={{ color: '#3b82f6' }}>TOTAL VOTERS</div>
+                </div>
+                <div className="w-px h-10" style={{ background: '#bfdbfe' }} />
+                <div className="text-center flex-1">
+                  <div className="text-2xl font-bold" style={{ color: '#1a6fc4' }}>
+                    {Object.values(results).reduce((a, b) => a + b, 0)}
+                  </div>
+                  <div className="text-xs font-semibold mt-0.5" style={{ color: '#3b82f6' }}>VOTES CAST</div>
+                </div>
+                <div className="w-px h-10" style={{ background: '#bfdbfe' }} />
+                <div className="flex-1 text-center">
+                  <span className="text-xs font-semibold px-2 py-1 rounded-full animate-pulse"
+                    style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}>
+                    🔴 Live
+                  </span>
+                </div>
+              </div>
+
+              {/* Per-position live counts */}
+              <div className="space-y-4 mb-6">
+                {positionsWithCandidates.map((position) => {
+                  const activeCands = candidates.filter(c => c.position === position && c.status === 'active')
+                  if (activeCands.length === 0) return null
+                  const total = totalForPosition(position)
+                  const isOpen = openPositions[position] !== false
+
+                  return (
+                    <div key={position} className="rounded-2xl overflow-hidden"
+                      style={{ background: '#fff', border: '2px solid #e8eef6', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+
+                      <button className="w-full flex items-center justify-between p-4"
+                        onClick={() => setOpenPositions(prev => ({ ...prev, [position]: !isOpen }))}>
+                        <div className="flex items-center gap-3 text-left">
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+                            style={{ background: 'linear-gradient(135deg, #1a9ef4, #1a6fc4)' }}>
+                            <BarChart2 className="w-4 h-4 text-white" />
+                          </div>
+                          <div>
+                            <div className="font-bold text-sm" style={{ color: '#0f172a' }}>{position}</div>
+                            <div className="text-xs" style={{ color: '#94a3b8' }}>
+                              {total} vote{total !== 1 ? 's' : ''} · {activeCands.length} candidate{activeCands.length !== 1 ? 's' : ''}
+                            </div>
+                          </div>
+                        </div>
+                        {isOpen
+                          ? <ChevronUp className="w-4 h-4 shrink-0" style={{ color: '#94a3b8' }} />
+                          : <ChevronDown className="w-4 h-4 shrink-0" style={{ color: '#94a3b8' }} />}
+                      </button>
+
+                      {isOpen && (
+                        <div className="px-4 pb-4 space-y-2">
+                          {activeCands
+                            .slice()
+                            .sort((a, b) => (results[b.id] || 0) - (results[a.id] || 0))
+                            .map((candidate, idx) => {
+                              const count = results[candidate.id] || 0
+                              const pct = total > 0 ? Math.round((count / total) * 100) : 0
+                              const isLeading = idx === 0 && count > 0
+
+                              return (
+                                <div key={candidate.id}
+                                  style={{
+                                    background: isLeading ? 'linear-gradient(135deg, #eff6ff, #dbeafe)' : '#f8fafc',
+                                    border: `2px solid ${isLeading ? '#bfdbfe' : '#e8eef6'}`,
+                                    borderRadius: 14,
+                                    padding: '12px 14px',
+                                  }}>
+                                  <div className="flex items-center gap-3">
+                                    <CandidateAvatar name={candidate.name} imageUrl={candidate.image_url} size={40} />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-sm leading-tight" style={{ color: '#0f172a' }}>
+                                          {candidate.name}
+                                        </span>
+                                        {isLeading && (
+                                          <span className="text-xs font-bold px-1.5 py-0.5 rounded-full"
+                                            style={{ background: '#dbeafe', color: '#1a6fc4' }}>
+                                            Leading
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-xs mt-0.5 font-medium" style={{ color: '#64748b' }}>
+                                        {count} vote{count !== 1 ? 's' : ''} · {pct}%
+                                      </div>
+                                    </div>
+                                    <div className="text-lg font-bold" style={{ color: '#1a6fc4', minWidth: 36, textAlign: 'right' }}>
+                                      {pct}%
+                                    </div>
+                                  </div>
+                                  <div className="mt-2.5">
+                                    <div className="w-full h-2 rounded-full" style={{ background: '#e8eef6' }}>
+                                      <div className="h-2 rounded-full transition-all duration-700"
+                                        style={{ width: `${pct}%`, background: 'linear-gradient(90deg,#1a9ef4,#1a6fc4)' }} />
+                                    </div>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          ) : (
+            /* Live count is OFF — just show a neutral message */
+            <div className="rounded-2xl p-6 text-center mb-6"
+              style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+              <div className="text-3xl mb-3">🔒</div>
+              <p className="font-semibold" style={{ color: '#0f172a' }}>Results not yet available</p>
+              <p className="text-sm mt-1" style={{ color: '#64748b' }}>
+                Live vote counts will be visible once the administrators enable them.
+              </p>
+            </div>
           )}
+
           <button onClick={onBack} className="w-full py-3 rounded-xl text-sm font-medium transition-colors"
             style={{ background: '#f1f5f9', color: '#475569' }}>
             Back to Election Home
@@ -216,6 +364,7 @@ export default function ElectionVoting({ onBack, settings }: {
     )
   }
 
+  // ─── VOTING VIEW (not yet submitted) ─────────────────────────────────────
   return (
     <div className="election-portal-bg min-h-screen">
       <style>{`
@@ -234,26 +383,11 @@ export default function ElectionVoting({ onBack, settings }: {
         @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
 
-      {/* Top bar */}
-      <div className="sticky top-0 z-10" style={{ background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #e8eef6' }}>
-        <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between">
-          <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium" style={{ color: '#64748b' }}>
-            <ArrowLeft className="w-4 h-4" /> Back
-          </button>
-          <div className="text-center">
-            <div className="font-bold text-sm" style={{ color: '#0f172a' }}>
-              NACSFUTO <span style={{ color: '#1a9ef4' }}>Election</span>
-            </div>
-          </div>
-          <div className="text-xs font-medium" style={{ color: '#1a9ef4' }}>
-            {getDisplayName(profile)}
-          </div>
-        </div>
-      </div>
+      <TopBar />
 
       <div className="max-w-2xl mx-auto px-4 py-6">
 
-        {/* Live stats bar — only shown when liveCountVisible is ON */}
+        {/* Live stats bar */}
         {showLiveCount && (
           <div className="rounded-2xl p-4 mb-5 flex items-center justify-between gap-4"
             style={{ background: 'linear-gradient(135deg, #eff6ff, #dbeafe)', border: '1px solid #bfdbfe' }}>
@@ -278,22 +412,8 @@ export default function ElectionVoting({ onBack, settings }: {
           </div>
         )}
 
-        {/* Already submitted */}
-        {hasSubmitted && !justSubmitted && (
-          <div className="rounded-2xl p-4 mb-6 flex items-center gap-3"
-            style={{ background: 'linear-gradient(135deg, #d1fae5, #a7f3d0)', border: '1px solid #6ee7b7' }}>
-            <CheckCircle className="w-5 h-5 shrink-0" style={{ color: '#059669' }} />
-            <div>
-              <p className="text-sm font-bold" style={{ color: '#065f46' }}>Ballot Already Submitted</p>
-              <p className="text-xs" style={{ color: '#047857' }}>
-                {showLiveCount ? 'Live vote count is shown below.' : 'Results will be revealed when announced.'}
-              </p>
-            </div>
-          </div>
-        )}
-
         {/* Election closed */}
-        {!settings.electionOpen && !hasSubmitted && (
+        {!settings.electionOpen && (
           <div className="rounded-2xl p-5 mb-6 text-center"
             style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
             <div className="text-3xl mb-2">🔒</div>
@@ -303,7 +423,7 @@ export default function ElectionVoting({ onBack, settings }: {
         )}
 
         {/* Voting progress */}
-        {settings.electionOpen && !hasSubmitted && positionsWithCandidates.length > 0 && (
+        {settings.electionOpen && positionsWithCandidates.length > 0 && (
           <div className="rounded-2xl p-4 mb-5" style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-semibold" style={{ color: '#0f172a' }}>Your Ballot</span>
@@ -330,7 +450,7 @@ export default function ElectionVoting({ onBack, settings }: {
             const myVoteSet = myVotes[position] || new Set<string>()
             const total = totalForPosition(position)
             const isOpen = openPositions[position] !== false
-            const canVote = settings.electionOpen && !hasSubmitted
+            const canVote = settings.electionOpen
             const activeCands = posCandidates.filter(c => c.status === 'active')
             const suspendedCands = posCandidates.filter(c => c.status === 'suspended')
             const disqualifiedCands = posCandidates.filter(c => c.status === 'disqualified')
@@ -497,7 +617,7 @@ export default function ElectionVoting({ onBack, settings }: {
         </div>
 
         {/* Submit */}
-        {settings.electionOpen && !hasSubmitted && positionsWithCandidates.length > 0 && (
+        {settings.electionOpen && positionsWithCandidates.length > 0 && (
           <div className="rounded-2xl p-5" style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
             <div className="flex items-start gap-2 rounded-xl p-3 mb-4 text-sm"
               style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e40af' }}>
