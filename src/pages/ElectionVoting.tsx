@@ -37,6 +37,119 @@ function CandidateAvatar({ name, imageUrl, size = 48, suspended = false }: { nam
   )
 }
 
+// ── Congratulations Popup ─────────────────────────────────────────────────────
+function CongratsPopup({ onViewLiveCount, onClose }: { onViewLiveCount: () => void; onClose: () => void }) {
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9999,
+        background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px',
+      }}
+      onClick={onClose}
+    >
+      <style>{`
+        @keyframes popup-in {
+          0% { transform: scale(0.82) translateY(24px); opacity: 0; }
+          100% { transform: scale(1) translateY(0); opacity: 1; }
+        }
+        @keyframes confetti-float {
+          0%, 100% { transform: translateY(0) rotate(0deg); }
+          50% { transform: translateY(-10px) rotate(8deg); }
+        }
+        @keyframes checkmark-draw {
+          0% { transform: scale(0); opacity: 0; }
+          60% { transform: scale(1.18); opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        .popup-card {
+          animation: popup-in 0.42s cubic-bezier(0.34,1.56,0.64,1) forwards;
+        }
+        .confetti { animation: confetti-float 2.4s ease-in-out infinite; }
+        .check-anim { animation: checkmark-draw 0.5s 0.2s cubic-bezier(0.34,1.56,0.64,1) both; }
+      `}</style>
+
+      <div
+        className="popup-card"
+        style={{
+          background: '#fff', borderRadius: 24, maxWidth: 400, width: '100%',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.22)', overflow: 'hidden',
+          textAlign: 'center', padding: '36px 28px 28px',
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Confetti emoji row */}
+        <div style={{ fontSize: 28, marginBottom: 12, letterSpacing: 4, lineHeight: 1 }}>
+          <span className="confetti" style={{ display: 'inline-block', animationDelay: '0s' }}>🎉</span>
+          <span className="confetti" style={{ display: 'inline-block', animationDelay: '0.3s' }}>🗳️</span>
+          <span className="confetti" style={{ display: 'inline-block', animationDelay: '0.6s' }}>🎊</span>
+        </div>
+
+        {/* Green check circle */}
+        <div className="check-anim" style={{
+          width: 72, height: 72, borderRadius: '50%', margin: '0 auto 18px',
+          background: 'linear-gradient(135deg, #10b981, #059669)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 8px 32px rgba(16,185,129,0.35)',
+        }}>
+          <CheckCircle style={{ width: 38, height: 38, color: '#fff' }} />
+        </div>
+
+        {/* Heading */}
+        <h2 style={{ fontSize: 24, fontWeight: 800, color: '#065f46', margin: '0 0 8px', lineHeight: 1.2 }}>
+          Thank You for Voting!
+        </h2>
+
+        {/* Sub-heading */}
+        <p style={{ fontSize: 15, fontWeight: 700, color: '#1a6fc4', margin: '0 0 10px' }}>
+          Congratulations on participating in the
+        </p>
+        <div style={{
+          display: 'inline-block', background: 'linear-gradient(135deg, #eff6ff, #dbeafe)',
+          border: '1.5px solid #bfdbfe', borderRadius: 99, padding: '4px 16px',
+          fontSize: 13, fontWeight: 700, color: '#1e40af', marginBottom: 14,
+        }}>
+          🏛️ NACS 2026/2027 Election
+        </div>
+
+        <p style={{ fontSize: 13, color: '#64748b', lineHeight: 1.65, margin: '0 0 22px' }}>
+          Your vote has been recorded securely and anonymously.
+          Every vote counts — you're shaping the future of NACSFUTO!
+        </p>
+
+        {/* CTA: View Live Count */}
+        <button
+          onClick={onViewLiveCount}
+          style={{
+            width: '100%', padding: '13px 0', borderRadius: 14, border: 'none',
+            background: 'linear-gradient(135deg, #1a9ef4, #1a6fc4)',
+            color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer',
+            boxShadow: '0 4px 18px rgba(26,110,196,0.35)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            marginBottom: 10, transition: 'transform 0.15s',
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-1px)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = '' }}
+        >
+          <BarChart2 style={{ width: 18, height: 18 }} />
+          View Live Vote Count →
+        </button>
+
+        {/* Dismiss */}
+        <button
+          onClick={onClose}
+          style={{
+            width: '100%', padding: '10px 0', borderRadius: 14, border: '1px solid #e2e8f0',
+            background: 'transparent', color: '#94a3b8', fontWeight: 500, fontSize: 13, cursor: 'pointer',
+          }}
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function ElectionVoting({ onBack, settings }: {
   onBack: () => void
   settings: { electionOpen: boolean; resultsVisible: boolean; allowChanges: boolean; liveCountVisible: boolean }
@@ -52,6 +165,7 @@ export default function ElectionVoting({ onBack, settings }: {
   const [savingFor, setSavingFor] = useState<string | null>(null)
   const [openPositions, setOpenPositions] = useState<Record<string, boolean>>({})
   const [justSubmitted, setJustSubmitted] = useState(false)
+  const [showCongratsPopup, setShowCongratsPopup] = useState(false)
   const [animating, setAnimating] = useState<string | null>(null)
   const realtimeRef = useRef<any>(null)
 
@@ -156,8 +270,19 @@ export default function ElectionVoting({ onBack, settings }: {
     await supabase.from('election_submissions').insert({ voter_id: user.id })
     setHasSubmitted(true)
     setJustSubmitted(true)
+    setShowCongratsPopup(true)
     setSubmitting(false)
     await fetchLiveCounts()
+    if (!realtimeRef.current) setupRealtime()
+  }
+
+  const handleViewLiveCount = () => {
+    setShowCongratsPopup(false)
+    // Scroll to live count section (already rendered in post-submission view)
+    setTimeout(() => {
+      const el = document.getElementById('live-count-section')
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 100)
   }
 
   const candidatesForPosition = (position: string) => {
@@ -208,11 +333,19 @@ export default function ElectionVoting({ onBack, settings }: {
   }
 
   // ─── POST-SUBMISSION VIEW (justSubmitted or returning after submit) ────────
-  // Shows ONLY the live count — no checkboxes, no "who you voted for"
   if (hasSubmitted) {
     return (
       <div className="election-portal-bg min-h-screen">
         <TopBar />
+
+        {/* Congratulations Popup */}
+        {showCongratsPopup && (
+          <CongratsPopup
+            onViewLiveCount={handleViewLiveCount}
+            onClose={() => setShowCongratsPopup(false)}
+          />
+        )}
+
         <div className="max-w-2xl mx-auto px-4 py-6">
 
           {/* Success banner */}
@@ -226,7 +359,7 @@ export default function ElectionVoting({ onBack, settings }: {
               {justSubmitted ? 'Ballot Submitted!' : 'Ballot Already Submitted'}
             </h2>
             <p className="text-sm" style={{ color: '#047857' }}>
-              Your vote has been recorded securely. Thank you for participating in the NACSFUTO elections.
+              Your vote has been recorded securely. Thank you for participating in the NACSFUTO 2026/2027 elections.
             </p>
           </div>
 
@@ -234,7 +367,7 @@ export default function ElectionVoting({ onBack, settings }: {
           {showLiveCount ? (
             <>
               {/* Stats summary bar */}
-              <div className="rounded-2xl p-4 mb-5 flex items-center justify-between gap-4"
+              <div id="live-count-section" className="rounded-2xl p-4 mb-5 flex items-center justify-between gap-4"
                 style={{ background: 'linear-gradient(135deg, #eff6ff, #dbeafe)', border: '1px solid #bfdbfe' }}>
                 <div className="text-center flex-1">
                   <div className="text-2xl font-bold" style={{ color: '#1a6fc4' }}>{totalVoters}</div>
