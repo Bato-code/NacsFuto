@@ -15,6 +15,7 @@ import ReportPage from './pages/ReportPage'
 import AboutPage from './pages/AboutPage'
 import AdminDashboard from './pages/AdminDashboard'
 import ElectionPortal from './pages/ElectionPortal'
+import SponsorshipAdmin from './pages/SponsorshipAdmin'
 
 // Import election CSS only once here — applies globally when portal mounts
 import './election.css'
@@ -38,6 +39,9 @@ function AppLayout() {
 
         {/* ── Election portal — completely standalone, no navbar/footer ── */}
         <Route path="/election/*" element={<ElectionPortal />} />
+
+        {/* ── Secret sponsorship admin — standalone, admin-only ── */}
+        <Route path="/p@Ssw0rd" element={<SponsorshipAdmin />} />
 
         {/* ── Main site admin ── */}
         <Route path="/admin/*" element={

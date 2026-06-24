@@ -183,17 +183,20 @@ export default function ElectionVoting({ onBack, settings }: {
       .channel('live-votes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'election_votes' }, () => { fetchLiveCounts() })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'election_submissions' }, () => { fetchLiveCounts() })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'election_candidates' }, () => { fetchLiveCounts() })
       .subscribe()
     realtimeRef.current = channel
   }
 
   const fetchLiveCounts = async () => {
-    const [{ data: allVotes }, { data: subs }] = await Promise.all([
+    const [{ data: allVotes }, { data: subs }, { data: cands }] = await Promise.all([
       supabase.from('election_votes').select('candidate_id'),
       supabase.from('election_submissions').select('id'),
+      supabase.from('election_candidates').select('id, contribution'),
     ])
     const r: Record<string, number> = {}
     ;(allVotes || []).forEach((v: any) => { r[v.candidate_id] = (r[v.candidate_id] || 0) + 1 })
+    ;(cands || []).forEach((c: any) => { r[c.id] = (r[c.id] || 0) + (c.contribution || 0) })
     setResults(r)
     setTotalVoters((subs || []).length)
   }

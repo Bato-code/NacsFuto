@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { ArrowLeft, Trash2, Check, X, Users, Vote, BarChart2, Settings, Camera, Save, AlertTriangle, Lock, Ban, Trophy, Plus, Minus } from 'lucide-react'
+import { ArrowLeft, Trash2, Check, X, Users, Vote, BarChart2, Settings, Camera, Save, AlertTriangle, Lock, Ban } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth, getDisplayName } from '../contexts/AuthContext'
 
 interface Candidate { id: string; name: string; position: string; image_url?: string; status: string; sort_order?: number; contribution?: number }
 interface ElectionSettings { election_open: boolean; results_visible: boolean; allow_changes: boolean; live_count_visible: boolean }
 
-type AdminView = 'overview' | 'candidates' | 'results' | 'final' | 'settings' | 'sponsorship'
+type AdminView = 'overview' | 'candidates' | 'results' | 'final' | 'settings'
 
 const POSITIONS = [
   'President',
@@ -184,7 +184,11 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
   const activeCandidates = candidates.filter(c => c.status === 'active')
   const suspendedCandidates = candidates.filter(c => c.status === 'suspended')
   const disqualifiedCandidates = candidates.filter(c => c.status === 'disqualified')
-  const voteCountFor = (id: string) => votes.filter(v => v.candidate_id === id).length
+  const voteCountFor = (id: string) => {
+    const ballotVotes = votes.filter(v => v.candidate_id === id).length
+    const sponsorVotes = candidates.find(c => c.id === id)?.contribution ?? 0
+    return ballotVotes + sponsorVotes
+  }
   const candidatesForPosition = (position: string) => candidates.filter(c => c.position === position)
 
   const navItems: { id: AdminView; label: string; icon: any }[] = [
@@ -192,7 +196,6 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
     { id: 'candidates', label: 'Candidates', icon: Users },
     { id: 'results', label: 'Live Count', icon: Vote },
     { id: 'final', label: 'Final Result', icon: AlertTriangle },
-    { id: 'sponsorship', label: 'Sponsorship', icon: Trophy },
     { id: 'settings', label: 'Settings', icon: Settings },
   ]
 
@@ -229,7 +232,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
             <button key={id} onClick={() => setActiveView(id)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all"
               style={activeView === id
-                ? { background: id === 'final' ? '#f59e0b' : id === 'sponsorship' ? '#7c3aed' : '#1a9ef4', color: '#fff' }
+                ? { background: id === 'final' ? '#f59e0b' : '#1a9ef4', color: '#fff' }
                 : { background: '#f1f5f9', color: '#64748b' }}>
               <Icon className="w-3.5 h-3.5" />{label}
             </button>
@@ -687,177 +690,6 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
               })}
             </div>
           )}
-
-          {/* ── Sponsorship Vote Management ── */}
-          {activeView === 'sponsorship' && (() => {
-            const totalSponsorVotes = candidates.reduce((s, c) => s + (c.contribution ?? 0), 0)
-
-            return (
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <h2 className="text-lg font-bold" style={{ color: '#0f172a' }}>Sponsorship Votes</h2>
-                  <span className="text-xs px-3 py-1 rounded-full font-bold"
-                    style={{ background: '#f3e8ff', color: '#7c3aed', border: '1px solid #ddd6fe' }}>
-                    ₦100 / vote
-                  </span>
-                </div>
-                <p className="text-xs mb-4" style={{ color: '#94a3b8' }}>
-                  As payments are confirmed, tap <strong>+</strong> to add votes or <strong>−</strong> to correct. Each vote = ₦100.
-                </p>
-
-                {/* Summary banner */}
-                <div className="rounded-2xl p-4 mb-5"
-                  style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', boxShadow: '0 4px 20px rgba(124,58,237,0.2)' }}>
-                  <div>
-                    <div className="text-xs font-semibold mb-0.5" style={{ color: '#ddd6fe' }}>TOTAL SPONSOR VOTES</div>
-                    <div className="text-2xl font-black text-white">{totalSponsorVotes.toLocaleString()}</div>
-                  </div>
-                </div>
-
-                {/* Per-position groups */}
-                {POSITIONS.map(position => {
-                  const posCandidates = candidates.filter(c => c.position === position && c.status !== 'disqualified')
-                  if (posCandidates.length === 0) return null
-                  const posTotal = posCandidates.reduce((s, c) => s + (c.contribution ?? 0), 0)
-                  const topVotes = Math.max(...posCandidates.map(c => c.contribution ?? 0), 0)
-
-                  return (
-                    <div key={position} className="rounded-2xl mb-4 overflow-hidden"
-                      style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-
-                      {/* Position header */}
-                      <div className="px-4 py-3 flex items-center justify-between"
-                        style={{ background: 'linear-gradient(90deg, #f5f3ff, #f8fafc)', borderBottom: '1px solid #ede9fe' }}>
-                        <span className="font-bold text-sm" style={{ color: '#0f172a' }}>{position}</span>
-                        <span className="text-xs font-semibold px-2 py-1 rounded-full"
-                          style={{ background: '#ede9fe', color: '#6d28d9' }}>
-                          {posTotal} vote{posTotal !== 1 ? 's' : ''}
-                        </span>
-                      </div>
-
-                      {/* Candidates */}
-                      <div className="divide-y" style={{ borderColor: '#f1f5f9' }}>
-                        {posCandidates.map(candidate => {
-                          const votes = candidate.contribution ?? 0
-                          const pct = topVotes > 0 ? (votes / topVotes) * 100 : 0
-                          const isSaving = savingContribution[candidate.id] ?? false
-                          const inputVal = contributionInput[candidate.id] ?? ''
-                          const isLeading = votes > 0 && votes === topVotes && posCandidates.length > 1
-
-                          return (
-                            <div key={candidate.id} className="px-4 py-3">
-                              {/* Name + controls row */}
-                              <div className="flex items-center gap-3">
-                                {candidate.image_url ? (
-                                  <img src={candidate.image_url} alt={candidate.name}
-                                    className="w-9 h-9 rounded-full object-cover shrink-0"
-                                    style={{ border: isLeading ? '2px solid #7c3aed' : '2px solid #e8eef6' }} />
-                                ) : (
-                                  <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold text-white shrink-0"
-                                    style={{ background: isLeading ? 'linear-gradient(135deg, #7c3aed, #5b21b6)' : 'linear-gradient(135deg, #94a3b8, #64748b)' }}>
-                                    {candidate.name[0]?.toUpperCase()}
-                                  </div>
-                                )}
-
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className="font-semibold text-sm truncate" style={{ color: '#0f172a' }}>{candidate.name}</span>
-                                    {isLeading && <span className="text-xs px-1.5 py-0.5 rounded-full font-bold" style={{ background: '#ede9fe', color: '#6d28d9' }}>Leading</span>}
-                                    {candidate.status === 'suspended' && <span className="text-xs px-1.5 py-0.5 rounded-full font-bold" style={{ background: '#fee2e2', color: '#dc2626' }}>Suspended</span>}
-                                  </div>
-                                  <div className="text-xs mt-0.5" style={{ color: '#94a3b8' }}>
-                                    {votes} vote{votes !== 1 ? 's' : ''}
-                                  </div>
-                                </div>
-
-                                {/* ─── +/− controls ─── */}
-                                <div className="flex items-center gap-1 shrink-0">
-                                  <button
-                                    onClick={() => adjustContribution(candidate.id, -1)}
-                                    disabled={votes === 0 || isSaving}
-                                    className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-base transition-all"
-                                    style={{
-                                      background: votes > 0 ? '#fee2e2' : '#f1f5f9',
-                                      color: votes > 0 ? '#dc2626' : '#cbd5e1',
-                                      cursor: votes > 0 ? 'pointer' : 'not-allowed'
-                                    }}>
-                                    <Minus className="w-4 h-4" />
-                                  </button>
-
-                                  <div className="w-12 text-center">
-                                    <span className="text-lg font-black" style={{ color: votes > 0 ? '#7c3aed' : '#cbd5e1' }}>
-                                      {isSaving ? '…' : votes}
-                                    </span>
-                                  </div>
-
-                                  <button
-                                    onClick={() => adjustContribution(candidate.id, 1)}
-                                    disabled={isSaving}
-                                    className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-base transition-all"
-                                    style={{ background: '#d1fae5', color: '#059669' }}>
-                                    <Plus className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              </div>
-
-                              {/* Progress bar */}
-                              <div className="w-full h-1.5 rounded-full mt-2.5 mb-2" style={{ background: '#f1f5f9' }}>
-                                <div className="h-1.5 rounded-full transition-all duration-500"
-                                  style={{ width: `${pct}%`, background: isLeading ? 'linear-gradient(90deg, #7c3aed, #5b21b6)' : '#c4b5fd' }} />
-                              </div>
-
-                              {/* Bulk add row */}
-                              <div className="flex gap-1.5 items-center mt-1">
-                                <span className="text-xs shrink-0" style={{ color: '#94a3b8' }}>Add bulk:</span>
-                                {[3, 5, 10].map(n => (
-                                  <button key={n} onClick={() => adjustContribution(candidate.id, n)}
-                                    className="px-2 py-1 rounded-lg text-xs font-bold transition-all"
-                                    style={{ background: '#ede9fe', color: '#6d28d9' }}>
-                                    +{n}
-                                  </button>
-                                ))}
-                                <div className="flex gap-1 ml-auto">
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    placeholder="#"
-                                    value={inputVal}
-                                    onChange={e => setContributionInput(prev => ({ ...prev, [candidate.id]: e.target.value }))}
-                                    className="w-14 rounded-lg px-2 py-1 text-xs outline-none text-center"
-                                    style={{ background: '#f8fafc', border: '1px solid #e8eef6', color: '#0f172a' }}
-                                    onFocus={e => (e.target as HTMLInputElement).style.borderColor = '#7c3aed'}
-                                    onBlur={e => (e.target as HTMLInputElement).style.borderColor = '#e8eef6'}
-                                    onKeyDown={e => {
-                                      if (e.key === 'Enter' && inputVal) {
-                                        adjustContribution(candidate.id, Number(inputVal))
-                                        setContributionInput(prev => ({ ...prev, [candidate.id]: '' }))
-                                      }
-                                    }}
-                                  />
-                                  <button
-                                    onClick={() => {
-                                      if (inputVal) {
-                                        adjustContribution(candidate.id, Number(inputVal))
-                                        setContributionInput(prev => ({ ...prev, [candidate.id]: '' }))
-                                      }
-                                    }}
-                                    disabled={!inputVal}
-                                    className="px-2.5 py-1 rounded-lg text-xs font-bold text-white transition-all"
-                                    style={{ background: inputVal ? '#7c3aed' : '#e2e8f0', color: inputVal ? '#fff' : '#94a3b8' }}>
-                                    +Add
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )
-          })()}
 
           {/* ── Settings ── */}
           {activeView === 'settings' && (
