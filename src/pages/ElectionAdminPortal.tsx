@@ -60,6 +60,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
   const [submissions, setSubmissions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [savingSettings, setSavingSettings] = useState(false)
+  const [resettingVotes, setResettingVotes] = useState(false)
   const [contributionInput, setContributionInput] = useState<Record<string, string>>({})
   const [savingContribution, setSavingContribution] = useState<Record<string, boolean>>({})
 
@@ -158,11 +159,28 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
     fetchAll()
   }
 
+  // ── FIX: resetting votes must also clear each candidate's manually-set
+  // `contribution` ("sponsor votes"), since vote counts everywhere in the app
+  // are computed as ballotVotes + contribution (see voteCountFor / fetchLiveCounts).
+  // Without this, the Live Count / Final Result views kept showing old totals
+  // after a reset even though election_votes & election_submissions were cleared.
   const resetVotes = async () => {
     if (!confirm('Reset ALL votes and submissions? This cannot be undone.')) return
-    await supabase.from('election_votes').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-    await supabase.from('election_submissions').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-    fetchAll()
+    setResettingVotes(true)
+    try {
+      const results = await Promise.all([
+        supabase.from('election_votes').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
+        supabase.from('election_submissions').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
+        supabase.from('election_candidates').update({ contribution: 0 }).neq('id', '00000000-0000-0000-0000-000000000000'),
+      ])
+      const failed = results.find(r => r.error)
+      if (failed?.error) {
+        alert('Reset partially failed: ' + failed.error.message)
+      }
+    } finally {
+      await fetchAll()
+      setResettingVotes(false)
+    }
   }
 
   const updateContribution = async (id: string, amount: number) => {
@@ -309,11 +327,13 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                 <div className="px-4 py-3 flex items-center justify-between">
                   <div>
                     <div className="text-sm font-medium" style={{ color: '#ef4444' }}>Reset All Votes</div>
-                    <div className="text-xs" style={{ color: '#94a3b8' }}>Clear all votes and submissions</div>
+                    <div className="text-xs" style={{ color: '#94a3b8' }}>Clear all votes, submissions, and sponsor contributions</div>
                   </div>
-                  <button onClick={resetVotes}
+                  <button onClick={resetVotes} disabled={resettingVotes}
                     className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
-                    style={{ background: '#ef4444' }}>Reset</button>
+                    style={{ background: resettingVotes ? '#fca5a5' : '#ef4444' }}>
+                    {resettingVotes ? 'Resetting...' : 'Reset'}
+                  </button>
                 </div>
               </div>
             </div>
@@ -726,10 +746,10 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                 <p className="text-xs mb-4" style={{ color: '#b91c1c' }}>
                   These actions are irreversible. Please proceed with caution.
                 </p>
-                <button onClick={resetVotes}
+                <button onClick={resetVotes} disabled={resettingVotes}
                   className="w-full py-3 rounded-xl text-sm font-bold text-white"
-                  style={{ background: '#ef4444' }}>
-                  Reset All Votes & Submissions
+                  style={{ background: resettingVotes ? '#fca5a5' : '#ef4444' }}>
+                  {resettingVotes ? 'Resetting...' : 'Reset All Votes & Submissions'}
                 </button>
               </div>
             </div>
