@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useId } from 'react'
 import { Upload, Link, X, FileText, Image, Film, File } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
@@ -18,6 +18,13 @@ function getFileIcon(fileType: string) {
 }
 
 export default function FileUploader({ value, onChange, accept, label, bucket = 'uploads' }: FileUploaderProps) {
+  // Unique per-instance id so multiple FileUploaders on the same page
+  // (e.g. thumbnail + several course-body image blocks) never collide.
+  // Previously this was a hardcoded string id, which meant every instance's
+  // <label htmlFor> pointed at the *first* <input> in the DOM with that id —
+  // so uploading in a block overwrote whatever uploader rendered first (the thumbnail).
+  const inputId = useId()
+
   const [mode, setMode] = useState<'local' | 'url'>('local')
   const [uploading, setUploading] = useState(false)
   const [preview, setPreview] = useState<string | null>(null)
@@ -123,10 +130,10 @@ export default function FileUploader({ value, onChange, accept, label, bucket = 
             accept={accept || 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt'}
             onChange={handleFileChange}
             className="hidden"
-            id="file-uploader-input"
+            id={inputId}
           />
           <label
-            htmlFor="file-uploader-input"
+            htmlFor={inputId}
             className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed cursor-pointer transition-colors py-5"
             style={{ borderColor: uploading ? 'var(--accent)' : 'var(--border)', background: 'var(--input-bg)' }}
             onMouseEnter={e => (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent-border)'}
