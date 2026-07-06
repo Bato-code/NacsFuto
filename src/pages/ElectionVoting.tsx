@@ -189,17 +189,22 @@ export default function ElectionVoting({ onBack, settings }: {
     realtimeRef.current = channel
   }
 
+  // ── FIX: total voter count now comes from the get_total_voters() RPC
+  // instead of `.select('id')` on election_submissions. That table's RLS
+  // only lets a regular voter see their own row (or all rows if admin),
+  // so a plain select undercounted for everyone except admins. The RPC
+  // is SECURITY DEFINER and returns only a count, never row-level data.
   const fetchLiveCounts = async () => {
-    const [{ data: allVotes }, { data: subs }, { data: cands }] = await Promise.all([
+    const [{ data: allVotes }, { data: voterCount }, { data: cands }] = await Promise.all([
       supabase.from('election_votes').select('candidate_id'),
-      supabase.from('election_submissions').select('id'),
+      supabase.rpc('get_total_voters'),
       supabase.from('election_candidates').select('id, contribution'),
     ])
     const r: Record<string, number> = {}
     ;(allVotes || []).forEach((v: any) => { r[v.candidate_id] = (r[v.candidate_id] || 0) + 1 })
     ;(cands || []).forEach((c: any) => { r[c.id] = (r[c.id] || 0) + (c.contribution || 0) })
     setResults(r)
-    setTotalVoters((subs || []).length)
+    setTotalVoters(voterCount ?? 0)
   }
 
   const fetchAll = async () => {
