@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { Heart, MessageCircle, Share2, Trash2, Edit2, Check, X, Plus, Copy, ExternalLink } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Heart, MessageCircle, Share2, Trash2, Edit2, Check, X, Plus, ExternalLink } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth, getDisplayName } from '../contexts/AuthContext'
 import { Link, useParams, useNavigate } from 'react-router-dom'
@@ -35,6 +35,47 @@ function Avatar({ name, size = 36 }: { name: string; size?: number }) {
   )
 }
 
+// ── Image Lightbox ──────────────────────────────────────────────────────────────
+function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handler)
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', handler)
+      document.body.style.overflow = ''
+    }
+  }, [onClose])
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)',
+        zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '2rem', cursor: 'zoom-out', animation: 'fadeIn 0.15s ease',
+      }}
+    >
+      <img
+        src={src}
+        alt="Full view"
+        onClick={e => e.stopPropagation()}
+        style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 8, cursor: 'default' }}
+      />
+      <button
+        onClick={onClose}
+        aria-label="Close"
+        className="p-2 rounded-full transition-colors"
+        style={{ position: 'absolute', top: 20, right: 20, color: '#fff', background: 'rgba(255,255,255,0.12)' }}
+        onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.25)'}
+        onMouseLeave={e => (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.12)'}
+      >
+        <X className="w-6 h-6" />
+      </button>
+    </div>
+  )
+}
+
 // ── Share Popover ──────────────────────────────────────────────────────────────
 function ShareMenu({ postId, content, onClose }: { postId: string; content: string; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -46,7 +87,6 @@ function ShareMenu({ postId, content, onClose }: { postId: string; content: stri
   const encodedUrl = encodeURIComponent(url)
   const encodedText = encodeURIComponent(`${excerpt}\n\nRead more: ${url}`)
 
-  // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose()
@@ -164,7 +204,11 @@ function PostCard({ post, currentUserId, isAdmin, onDelete, onLike, highlighted 
   const [loading, setLoading] = useState(false)
   const [showShare, setShowShare] = useState(false)
   const [highlightRing, setHighlightRing] = useState(highlighted || false)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [isTruncated, setIsTruncated] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
+  const textRef = useRef<HTMLParagraphElement>(null)
   const { profile } = useAuth()
   const liked = currentUserId ? (post.liked_by || []).includes(currentUserId) : false
 
@@ -178,6 +222,22 @@ function PostCard({ post, currentUserId, isAdmin, onDelete, onLike, highlighted 
   }, [highlighted])
 
   useEffect(() => { if (showComments) fetchComments() }, [showComments])
+
+  // Detect whether the post text overflows 4 lines, to decide if "Read more" is needed
+  useEffect(() => {
+    const el = textRef.current
+    if (!el) return
+    // Measure against the collapsed (clamped) state
+    const check = () => {
+      const lineHeight = parseFloat(getComputedStyle(el).lineHeight || '20')
+      const collapsedMaxHeight = lineHeight * 4
+      // scrollHeight reflects full content height regardless of clamp
+      setIsTruncated(el.scrollHeight > collapsedMaxHeight + 2)
+    }
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [post.content])
 
   const fetchComments = async () => {
     const { data } = await supabase.from('comments').select('*').eq('post_id', post.id).order('created_at', { ascending: true })
@@ -239,7 +299,30 @@ function PostCard({ post, currentUserId, isAdmin, onDelete, onLike, highlighted 
               {isAdmin && <span className="badge-admin">ADMIN</span>}
               <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{timeAgo(post.created_at)}</span>
             </div>
-            <p className="text-sm mt-1 leading-relaxed whitespace-pre-wrap break-words" style={{ color: 'var(--text-secondary)' }}>{post.content}</p>
+
+            {/* Post text with 4-line clamp + Read more/less */}
+            <p
+              ref={textRef}
+              className="text-sm mt-1 leading-relaxed whitespace-pre-wrap break-words"
+              style={{
+                color: 'var(--text-secondary)',
+                display: '-webkit-box',
+                WebkitBoxOrient: 'vertical',
+                WebkitLineClamp: expanded ? ('unset' as any) : 4,
+                overflow: expanded ? 'visible' : 'hidden',
+              }}
+            >
+              {post.content}
+            </p>
+            {isTruncated && (
+              <button
+                onClick={() => setExpanded(e => !e)}
+                className="text-xs font-semibold mt-1"
+                style={{ color: 'var(--accent)' }}
+              >
+                {expanded ? 'Show less' : 'Read more'}
+              </button>
+            )}
           </div>
           {(isAdmin || post.author_id === currentUserId) && (
             <button onClick={() => onDelete(post.id)} className="p-1 rounded transition-colors shrink-0"
@@ -254,8 +337,18 @@ function PostCard({ post, currentUserId, isAdmin, onDelete, onLike, highlighted 
 
       {mediaUrl && (
         <div className="px-4 pb-3">
-          <img src={mediaUrl} alt="Post media" className="rounded-lg w-full max-h-80 object-cover" />
+          <img
+            src={mediaUrl}
+            alt="Post media"
+            onClick={() => setLightboxOpen(true)}
+            className="rounded-lg w-full max-h-80 object-cover"
+            style={{ cursor: 'zoom-in' }}
+          />
         </div>
+      )}
+
+      {lightboxOpen && mediaUrl && (
+        <ImageLightbox src={mediaUrl} onClose={() => setLightboxOpen(false)} />
       )}
 
       {iframeSrc && (
@@ -434,7 +527,8 @@ export default function FeedPage() {
 
   const fetchPosts = async () => {
     setLoading(true)
-    const { data } = await supabase.from('posts').select('*').eq('approved', true).order('created_at', { ascending: false })
+    const { data, error } = await supabase.from('posts').select('*').eq('approved', true).order('created_at', { ascending: false })
+    if (error) console.error('fetchPosts error:', error.message)
     setPosts(data || [])
     setLoading(false)
   }
@@ -476,16 +570,10 @@ export default function FeedPage() {
       {/* Create post box */}
       <div className="glass-card p-4 mb-6">
         {!user ? (
-          /* ── Guest: show share box but prompt sign-in on click ── */
+          /* ── Guest: prompt sign-in on click ── */
           <div>
-            <button
-              onClick={() => {
-                const el = document.createElement('div')
-                el.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;'
-                el.innerHTML = ''
-                document.body.appendChild(el)
-                window.location.href = '/login'
-              }}
+            <Link
+              to="/login"
               className="w-full flex items-center gap-3 text-left"
               style={{ color: 'var(--text-muted)' }}>
               <div className="w-8 h-8 rounded-full border flex items-center justify-center text-xs font-bold"
@@ -496,7 +584,7 @@ export default function FeedPage() {
                 Share something with NACS...
               </span>
               <Plus className="w-4 h-4 shrink-0" style={{ color: 'var(--accent)' }} />
-            </button>
+            </Link>
             <p className="text-xs text-center mt-2" style={{ color: 'var(--text-muted)' }}>
               <Link to="/login" style={{ color: 'var(--accent)' }} className="hover:underline">Sign in</Link>
               {' '}to like, comment and share posts
