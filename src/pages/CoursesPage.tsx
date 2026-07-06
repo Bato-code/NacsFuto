@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth, getDisplayName } from '../contexts/AuthContext'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import FileUploader from '../components/FileUploader'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,7 +129,8 @@ function BlockRenderer({ blocks }: { blocks: ContentBlock[] }) {
 }
 
 // ── Course card (grid item) ─────────────────────────────────────────────────────
-function CourseCard({ course, onView }: { course: Course; onView: (c: Course) => void }) {
+function CourseCard({ course }: { course: Course }) {
+  const navigate = useNavigate()
   return (
     <div className="glass-card p-4 sm:p-5 flex flex-col hover-lift">
       <div className="relative mb-3">
@@ -165,32 +166,77 @@ function CourseCard({ course, onView }: { course: Course; onView: (c: Course) =>
       </div>
       <div className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>By {course.instructor || course.author_name}</div>
 
-      <button onClick={() => onView(course)} className="cyber-btn-ghost text-xs w-full flex items-center justify-center gap-1.5">
+      <button onClick={() => navigate(`/courses/${course.id}`)} className="cyber-btn-ghost text-xs w-full flex items-center justify-center gap-1.5">
         <Eye className="w-3.5 h-3.5" /> View Course
       </button>
     </div>
   )
 }
 
-// ── Detail modal ────────────────────────────────────────────────────────────────
-function CourseDetailModal({ course, onClose }: { course: Course; onClose: () => void }) {
+// ── Detail page (full page, not a modal) ─────────────────────────────────────────
+// Mount this at a route like <Route path="/courses/:id" element={<CourseDetailPage />} />
+// in your router (e.g. App.tsx / routes file) alongside the existing <CoursesPage /> route.
+export function CourseDetailPage() {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const [course, setCourse] = useState<Course | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    const fetchCourse = async () => {
+      setLoading(true)
+      setNotFound(false)
+      const { data, error } = await supabase.from('courses').select('*').eq('id', id).single()
+      if (cancelled) return
+      if (error || !data) {
+        setNotFound(true)
+      } else {
+        setCourse(data as Course)
+      }
+      setLoading(false)
+    }
+    if (id) fetchCourse()
+    return () => { cancelled = true }
+  }, [id])
+
+  if (loading) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-16 flex justify-center">
+        <div className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }} />
+      </div>
+    )
+  }
+
+  if (notFound || !course) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-16 text-center">
+        <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-30" style={{ color: 'var(--text-muted)' }} />
+        <div className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Course not found</div>
+        <button onClick={() => navigate('/courses')} className="cyber-btn text-sm mt-4">Back to Courses</button>
+      </div>
+    )
+  }
+
   return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal-content p-0 overflow-hidden" style={{ maxWidth: 640 }}>
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      <button onClick={() => navigate('/courses')} className="cyber-btn-ghost text-xs mb-4 inline-flex items-center gap-1.5">
+        ← Back to Courses
+      </button>
+
+      <div className="glass-card p-0 overflow-hidden">
         <div className="relative">
           {course.thumbnail ? (
-            <img src={course.thumbnail} alt={course.title} className="w-full h-44 object-cover" />
+            <img src={course.thumbnail} alt={course.title} className="w-full h-56 sm:h-72 object-cover" />
           ) : (
-            <div className="w-full h-44 flex items-center justify-center" style={{ background: 'var(--accent-dim)' }}>
+            <div className="w-full h-56 sm:h-72 flex items-center justify-center" style={{ background: 'var(--accent-dim)' }}>
               <BookOpen className="w-10 h-10 opacity-40" style={{ color: 'var(--accent)' }} />
             </div>
           )}
-          <button onClick={onClose} className="theme-toggle" style={{ position: 'absolute', top: 12, right: 12 }}>
-            <X className="w-4 h-4" />
-          </button>
         </div>
 
-        <div className="p-5 sm:p-6 max-h-[70vh] overflow-y-auto">
+        <div className="p-5 sm:p-8">
           <div className="flex items-center gap-2 flex-wrap mb-2">
             <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid var(--accent-border)' }}>
               {course.category}
@@ -203,17 +249,17 @@ function CourseDetailModal({ course, onClose }: { course: Course; onClose: () =>
             </span>
           </div>
 
-          <h2 className="font-bold text-xl mb-1" style={{ color: 'var(--text-primary)' }}>{course.title}</h2>
-          <div className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+          <h1 className="font-bold text-2xl sm:text-3xl mb-1" style={{ color: 'var(--text-primary)' }}>{course.title}</h1>
+          <div className="text-xs mb-5" style={{ color: 'var(--text-muted)' }}>
             By {course.instructor || course.author_name}
             {course.duration && <> · {course.duration}</>}
           </div>
 
           {course.description && (
-            <p className="text-sm mb-5 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{course.description}</p>
+            <p className="text-sm mb-6 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{course.description}</p>
           )}
 
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 20 }}>
             <BlockRenderer blocks={course.content_blocks || []} />
           </div>
         </div>
@@ -303,6 +349,7 @@ function BlockEditor({ blocks, setBlocks }: { blocks: ContentBlock[]; setBlocks:
             {block.type === 'image' && (
               <div className="space-y-2">
                 <FileUploader
+                  key={`block-uploader-${block.id}`}
                   label=""
                   value={block.url || ''}
                   onChange={url => updateBlock(block.id, { url })}
@@ -364,7 +411,6 @@ export default function CoursesPage() {
   const [level, setLevel] = useState('All Levels')
   const [format, setFormat] = useState('All Formats')
   const [showSubmit, setShowSubmit] = useState(false)
-  const [viewingCourse, setViewingCourse] = useState<Course | null>(null)
   const [form, setForm] = useState(emptyForm())
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -480,13 +526,8 @@ export default function CoursesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map(course => <CourseCard key={course.id} course={course} onView={setViewingCourse} />)}
+          {filtered.map(course => <CourseCard key={course.id} course={course} />)}
         </div>
-      )}
-
-      {/* Detail modal */}
-      {viewingCourse && (
-        <CourseDetailModal course={viewingCourse} onClose={() => setViewingCourse(null)} />
       )}
 
       {/* Submit Modal */}
@@ -539,7 +580,11 @@ export default function CoursesPage() {
               {/* Thumbnail (required) */}
               <div>
                 <label className="text-xs mb-1.5 block font-semibold" style={{ color: 'var(--text-secondary)' }}>Course Thumbnail *</label>
+                <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+                  Recommended size: 1280×720px (16:9 landscape). JPG or PNG, max 2MB. This image is cropped with <code>object-cover</code>, so keep the subject centered.
+                </p>
                 <FileUploader
+                  key="thumbnail-uploader"
                   label=""
                   value={form.thumbnail}
                   onChange={url => setForm({ ...form, thumbnail: url })}
