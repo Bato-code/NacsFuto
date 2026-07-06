@@ -1,66 +1,359 @@
 import { useState, useEffect } from 'react'
-import { Search, BookOpen, Plus, Star, Users, Clock, X, Play } from 'lucide-react'
+import {
+  Search, BookOpen, Plus, Star, Users, Clock, X, Play,
+  GripVertical, Trash2, ArrowUp, ArrowDown, Type, Heading as HeadingIcon,
+  Image as ImageIcon, Film, Eye,
+} from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth, getDisplayName } from '../contexts/AuthContext'
 import { Link } from 'react-router-dom'
 import FileUploader from '../components/FileUploader'
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTE ON SCHEMA: this page now expects the following columns on `courses`
+// (in addition to what already existed): 
+//   level            text        -- 'Beginner' | 'Intermediate' | 'Advanced'
+//   format           text        -- 'text' | 'video' | 'text_video'
+//   thumbnail        text        -- required cover image URL
+//   content_blocks   jsonb        -- ordered array of ContentBlock (see below)
+// The old free-form `topics`/`type`/`media` fields are no longer written to,
+// but are left alone in case older rows still use them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type BlockType = 'heading' | 'paragraph' | 'image' | 'video'
+
+interface ContentBlock {
+  id: string
+  type: BlockType
+  text?: string        // heading / paragraph content
+  url?: string          // image URL
+  videoUrl?: string     // raw pasted video URL (youtube etc.)
+  caption?: string       // optional caption for image / video
+}
+
+type CourseLevel = 'Beginner' | 'Intermediate' | 'Advanced'
+type CourseFormat = 'text' | 'video' | 'text_video'
+
 interface Course {
-  id: string; title: string; category: string; level: string; duration: string
-  description: string; topics: string[]; instructor: string; type: string
-  approved: boolean; students: number; rating: number; author_name: string; media: any; created_at: string
+  id: string
+  title: string
+  category: string
+  level: CourseLevel
+  format: CourseFormat
+  duration: string
+  description: string
+  instructor: string
+  thumbnail: string
+  content_blocks: ContentBlock[]
+  approved: boolean
+  students: number
+  rating: number
+  author_name: string
+  author_id?: string
+  created_at: string
 }
 
 const CATEGORIES = ['All Categories', 'Cybersecurity', 'Networking', 'Programming', 'Operating Systems', 'Research', 'Other']
-const LEVELS = ['All Levels', '100', '200', '300', '400', '500']
+const LEVELS: CourseLevel[] = ['Beginner', 'Intermediate', 'Advanced']
+const FORMATS: { value: CourseFormat; label: string; icon: string }[] = [
+  { value: 'text', label: 'Text Only', icon: '📝' },
+  { value: 'video', label: 'Video Only', icon: '🎬' },
+  { value: 'text_video', label: 'Text + Media', icon: '🧩' },
+]
 
-function CourseCard({ course }: { course: Course }) {
-  const mediaUrl = course.media?.thumbnail || course.media?.url || null
-  const embedUrl = course.media?.embed_url || null
+const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 
-  const getEmbedSrc = (url: string) => {
-    const ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\s]+)/)
-    if (ytMatch) return `https://www.youtube.com/embed/${ytMatch[1]}`
-    if (url.includes('facebook.com')) return `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(url)}`
-    return null
+function getEmbedSrc(url: string) {
+  if (!url) return null
+  const yt = url.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([^&?/\s]+)/)
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}`
+  if (url.includes('facebook.com')) return `https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(url)}`
+  return null
+}
+
+const levelColor = (level: string) => {
+  if (level === 'Beginner') return { background: 'rgba(16,185,129,0.12)', color: '#10b981', border: '1px solid rgba(16,185,129,0.3)' }
+  if (level === 'Intermediate') return { background: 'rgba(59,130,246,0.12)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.3)' }
+  return { background: 'rgba(239,68,68,0.12)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }
+}
+
+const formatMeta = (format: string) => FORMATS.find(f => f.value === format) || FORMATS[2]
+
+// ── Renders an ordered list of content blocks (read-only, used in the detail view) ──
+function BlockRenderer({ blocks }: { blocks: ContentBlock[] }) {
+  if (!blocks || blocks.length === 0) {
+    return <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No content added yet.</p>
   }
-  const iframeSrc = embedUrl ? getEmbedSrc(embedUrl) : null
-
   return (
-    <div className="glass-card p-4 sm:p-5 flex flex-col hover-lift">
-      {iframeSrc ? (
-        <div className="rounded-lg overflow-hidden mb-3" style={{ aspectRatio: '16/9' }}>
-          <iframe src={iframeSrc} className="w-full h-full" allowFullScreen
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            title={course.title} style={{ border: 'none' }} />
-        </div>
-      ) : embedUrl ? (
-        <a href={embedUrl} target="_blank" rel="noopener noreferrer"
-          className="flex items-center justify-center gap-2 rounded-lg mb-3 h-28"
-          style={{ background: 'var(--accent-dim)', border: '1px solid var(--accent-border)', color: 'var(--accent)' }}>
-          <Play className="w-6 h-6" />
-          <span className="text-sm font-medium">Watch Video</span>
-        </a>
-      ) : mediaUrl ? (
-        <img src={mediaUrl} alt={course.title} className="w-full h-28 object-cover rounded-lg mb-3" />
-      ) : null}
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid var(--accent-border)' }}>
-          {course.category}
-        </span>
-        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{course.type}</span>
-      </div>
-      <h3 className="font-semibold text-sm mb-1 flex-1 leading-snug" style={{ color: 'var(--text-primary)' }}>{course.title}</h3>
-      <p className="text-xs mb-3 line-clamp-2" style={{ color: 'var(--text-secondary)' }}>{course.description}</p>
-      <div className="flex items-center gap-3 text-xs mt-auto" style={{ color: 'var(--text-muted)' }}>
-        <span className="flex items-center gap-1"><Users className="w-3 h-3" />{course.students || 0}</span>
-        <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{course.duration}</span>
-        {course.rating && <span className="flex items-center gap-1"><Star className="w-3 h-3 text-yellow-400 fill-current" />{course.rating}</span>}
-      </div>
-      <div className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>By {course.instructor || course.author_name}</div>
+    <div className="space-y-4">
+      {blocks.map(block => {
+        if (block.type === 'heading') {
+          return <h3 key={block.id} className="font-bold text-base mt-2" style={{ color: 'var(--text-primary)' }}>{block.text}</h3>
+        }
+        if (block.type === 'paragraph') {
+          return <p key={block.id} className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--text-secondary)' }}>{block.text}</p>
+        }
+        if (block.type === 'image') {
+          return (
+            <figure key={block.id}>
+              <img src={block.url} alt={block.caption || 'Course image'} className="w-full rounded-lg object-cover max-h-96" />
+              {block.caption && <figcaption className="text-xs text-center mt-1" style={{ color: 'var(--text-muted)' }}>{block.caption}</figcaption>}
+            </figure>
+          )
+        }
+        if (block.type === 'video') {
+          const src = getEmbedSrc(block.videoUrl || '')
+          return (
+            <figure key={block.id}>
+              {src ? (
+                <div className="rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
+                  <iframe src={src} className="w-full h-full" allowFullScreen
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    title={block.caption || 'Course video'} style={{ border: 'none' }} />
+                </div>
+              ) : (
+                <a href={block.videoUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-2 p-3 rounded-lg border text-xs"
+                  style={{ borderColor: 'var(--accent-border)', color: 'var(--accent)', background: 'var(--accent-dim)' }}>
+                  <Play className="w-4 h-4" /> Watch video <span className="ml-auto opacity-70">{block.videoUrl}</span>
+                </a>
+              )}
+              {block.caption && <figcaption className="text-xs text-center mt-1" style={{ color: 'var(--text-muted)' }}>{block.caption}</figcaption>}
+            </figure>
+          )
+        }
+        return null
+      })}
     </div>
   )
 }
+
+// ── Course card (grid item) ─────────────────────────────────────────────────────
+function CourseCard({ course, onView }: { course: Course; onView: (c: Course) => void }) {
+  return (
+    <div className="glass-card p-4 sm:p-5 flex flex-col hover-lift">
+      <div className="relative mb-3">
+        {course.thumbnail ? (
+          <img src={course.thumbnail} alt={course.title} className="w-full h-32 object-cover rounded-lg" />
+        ) : (
+          <div className="w-full h-32 rounded-lg flex items-center justify-center" style={{ background: 'var(--accent-dim)' }}>
+            <BookOpen className="w-8 h-8 opacity-40" style={{ color: 'var(--accent)' }} />
+          </div>
+        )}
+        <span className="absolute bottom-2 right-2 text-xs px-2 py-0.5 rounded-full font-medium"
+          style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}>
+          {formatMeta(course.format).icon} {formatMeta(course.format).label}
+        </span>
+      </div>
+
+      <div className="flex items-start justify-between gap-2 mb-2 flex-wrap">
+        <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid var(--accent-border)' }}>
+          {course.category}
+        </span>
+        <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={levelColor(course.level)}>
+          {course.level}
+        </span>
+      </div>
+
+      <h3 className="font-semibold text-sm mb-1 leading-snug" style={{ color: 'var(--text-primary)' }}>{course.title}</h3>
+      <p className="text-xs mb-3 line-clamp-2" style={{ color: 'var(--text-secondary)' }}>{course.description}</p>
+
+      <div className="flex items-center gap-3 text-xs mt-auto mb-2" style={{ color: 'var(--text-muted)' }}>
+        <span className="flex items-center gap-1"><Users className="w-3 h-3" />{course.students || 0}</span>
+        {course.duration && <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{course.duration}</span>}
+        {course.rating ? <span className="flex items-center gap-1"><Star className="w-3 h-3 text-yellow-400 fill-current" />{course.rating}</span> : null}
+      </div>
+      <div className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>By {course.instructor || course.author_name}</div>
+
+      <button onClick={() => onView(course)} className="cyber-btn-ghost text-xs w-full flex items-center justify-center gap-1.5">
+        <Eye className="w-3.5 h-3.5" /> View Course
+      </button>
+    </div>
+  )
+}
+
+// ── Detail modal ────────────────────────────────────────────────────────────────
+function CourseDetailModal({ course, onClose }: { course: Course; onClose: () => void }) {
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal-content p-0 overflow-hidden" style={{ maxWidth: 640 }}>
+        <div className="relative">
+          {course.thumbnail ? (
+            <img src={course.thumbnail} alt={course.title} className="w-full h-44 object-cover" />
+          ) : (
+            <div className="w-full h-44 flex items-center justify-center" style={{ background: 'var(--accent-dim)' }}>
+              <BookOpen className="w-10 h-10 opacity-40" style={{ color: 'var(--accent)' }} />
+            </div>
+          )}
+          <button onClick={onClose} className="theme-toggle" style={{ position: 'absolute', top: 12, right: 12 }}>
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-5 sm:p-6 max-h-[70vh] overflow-y-auto">
+          <div className="flex items-center gap-2 flex-wrap mb-2">
+            <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid var(--accent-border)' }}>
+              {course.category}
+            </span>
+            <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={levelColor(course.level)}>
+              {course.level}
+            </span>
+            <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--input-bg)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+              {formatMeta(course.format).icon} {formatMeta(course.format).label}
+            </span>
+          </div>
+
+          <h2 className="font-bold text-xl mb-1" style={{ color: 'var(--text-primary)' }}>{course.title}</h2>
+          <div className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+            By {course.instructor || course.author_name}
+            {course.duration && <> · {course.duration}</>}
+          </div>
+
+          {course.description && (
+            <p className="text-sm mb-5 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{course.description}</p>
+          )}
+
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+            <BlockRenderer blocks={course.content_blocks || []} />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Block editor (used inside the submit modal) ─────────────────────────────────
+function BlockEditor({ blocks, setBlocks }: { blocks: ContentBlock[]; setBlocks: (b: ContentBlock[]) => void }) {
+  const addBlock = (type: BlockType) => {
+    const base: ContentBlock = { id: uid(), type }
+    setBlocks([...blocks, base])
+  }
+  const updateBlock = (id: string, patch: Partial<ContentBlock>) => {
+    setBlocks(blocks.map(b => b.id === id ? { ...b, ...patch } : b))
+  }
+  const removeBlock = (id: string) => setBlocks(blocks.filter(b => b.id !== id))
+  const moveBlock = (id: string, dir: -1 | 1) => {
+    const idx = blocks.findIndex(b => b.id === id)
+    const newIdx = idx + dir
+    if (newIdx < 0 || newIdx >= blocks.length) return
+    const copy = [...blocks]
+    ;[copy[idx], copy[newIdx]] = [copy[newIdx], copy[idx]]
+    setBlocks(copy)
+  }
+
+  const blockLabel = (type: BlockType) => ({
+    heading: 'Heading',
+    paragraph: 'Paragraph',
+    image: 'Image',
+    video: 'Video',
+  }[type])
+
+  const blockIcon = (type: BlockType) => {
+    if (type === 'heading') return <HeadingIcon className="w-3.5 h-3.5" />
+    if (type === 'paragraph') return <Type className="w-3.5 h-3.5" />
+    if (type === 'image') return <ImageIcon className="w-3.5 h-3.5" />
+    return <Film className="w-3.5 h-3.5" />
+  }
+
+  return (
+    <div>
+      <label className="text-xs mb-2 block font-semibold" style={{ color: 'var(--text-secondary)' }}>
+        Course Body — add sections, paragraphs, images and videos in any order
+      </label>
+
+      {blocks.length === 0 && (
+        <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
+          No sections yet. Use the buttons below to start building the course content.
+        </p>
+      )}
+
+      <div className="space-y-3 mb-3">
+        {blocks.map((block, idx) => (
+          <div key={block.id} className="rounded-lg p-3" style={{ border: '1px solid var(--border)', background: 'var(--input-bg)' }}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: 'var(--accent)' }}>
+                <GripVertical className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
+                {blockIcon(block.type)} {blockLabel(block.type)} #{idx + 1}
+              </span>
+              <div className="flex items-center gap-1">
+                <button type="button" onClick={() => moveBlock(block.id, -1)} disabled={idx === 0}
+                  className="p-1 rounded" style={{ color: idx === 0 ? 'var(--text-muted)' : 'var(--text-secondary)', opacity: idx === 0 ? 0.4 : 1 }}>
+                  <ArrowUp className="w-3.5 h-3.5" />
+                </button>
+                <button type="button" onClick={() => moveBlock(block.id, 1)} disabled={idx === blocks.length - 1}
+                  className="p-1 rounded" style={{ color: idx === blocks.length - 1 ? 'var(--text-muted)' : 'var(--text-secondary)', opacity: idx === blocks.length - 1 ? 0.4 : 1 }}>
+                  <ArrowDown className="w-3.5 h-3.5" />
+                </button>
+                <button type="button" onClick={() => removeBlock(block.id)} className="p-1 rounded" style={{ color: '#ef4444' }}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {block.type === 'heading' && (
+              <input className="cyber-input text-sm" placeholder="Section heading, e.g. 'Chapter 1: Getting Started'"
+                value={block.text || ''} onChange={e => updateBlock(block.id, { text: e.target.value })} />
+            )}
+
+            {block.type === 'paragraph' && (
+              <textarea className="cyber-input text-sm resize-none h-24" placeholder="Write this section's content..."
+                value={block.text || ''} onChange={e => updateBlock(block.id, { text: e.target.value })} />
+            )}
+
+            {block.type === 'image' && (
+              <div className="space-y-2">
+                <FileUploader
+                  label=""
+                  value={block.url || ''}
+                  onChange={url => updateBlock(block.id, { url })}
+                  accept="image/*"
+                />
+                <input className="cyber-input text-xs" placeholder="Optional caption"
+                  value={block.caption || ''} onChange={e => updateBlock(block.id, { caption: e.target.value })} />
+              </div>
+            )}
+
+            {block.type === 'video' && (
+              <div className="space-y-2">
+                <input className="cyber-input text-sm" placeholder="Paste a YouTube (or Facebook) video URL"
+                  value={block.videoUrl || ''} onChange={e => updateBlock(block.id, { videoUrl: e.target.value })} />
+                <input className="cyber-input text-xs" placeholder="Optional caption"
+                  value={block.caption || ''} onChange={e => updateBlock(block.id, { caption: e.target.value })} />
+                {block.videoUrl && getEmbedSrc(block.videoUrl) && (
+                  <div className="rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
+                    <iframe src={getEmbedSrc(block.videoUrl)!} className="w-full h-full" allowFullScreen title="Video preview" style={{ border: 'none' }} />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => addBlock('heading')} className="cyber-btn-ghost text-xs flex items-center gap-1.5">
+          <HeadingIcon className="w-3.5 h-3.5" /> Add Heading
+        </button>
+        <button type="button" onClick={() => addBlock('paragraph')} className="cyber-btn-ghost text-xs flex items-center gap-1.5">
+          <Type className="w-3.5 h-3.5" /> Add Paragraph
+        </button>
+        <button type="button" onClick={() => addBlock('image')} className="cyber-btn-ghost text-xs flex items-center gap-1.5">
+          <ImageIcon className="w-3.5 h-3.5" /> Add Image
+        </button>
+        <button type="button" onClick={() => addBlock('video')} className="cyber-btn-ghost text-xs flex items-center gap-1.5">
+          <Film className="w-3.5 h-3.5" /> Add Video
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Main page ────────────────────────────────────────────────────────────────────
+const emptyForm = () => ({
+  title: '', category: '', level: '' as CourseLevel | '', duration: '',
+  description: '', instructor: '', format: 'text_video' as CourseFormat,
+  thumbnail: '', blocks: [] as ContentBlock[],
+})
 
 export default function CoursesPage() {
   const { user, profile } = useAuth()
@@ -69,16 +362,19 @@ export default function CoursesPage() {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('All Categories')
   const [level, setLevel] = useState('All Levels')
+  const [format, setFormat] = useState('All Formats')
   const [showSubmit, setShowSubmit] = useState(false)
-  const [form, setForm] = useState({ title: '', category: '', level: '', duration: '', description: '', instructor: '', type: 'Course', mediaUrl: '', embedUrl: '', mediaMode: 'file' as 'file' | 'embed' })
+  const [viewingCourse, setViewingCourse] = useState<Course | null>(null)
+  const [form, setForm] = useState(emptyForm())
   const [submitting, setSubmitting] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
 
   useEffect(() => { fetchCourses() }, [])
 
   const fetchCourses = async () => {
     setLoading(true)
     const { data } = await supabase.from('courses').select('*').eq('approved', true).order('created_at', { ascending: false })
-    setCourses(data || [])
+    setCourses((data || []) as Course[])
     setLoading(false)
   }
 
@@ -86,23 +382,41 @@ export default function CoursesPage() {
     if (search && !c.title.toLowerCase().includes(search.toLowerCase()) && !c.description?.toLowerCase().includes(search.toLowerCase())) return false
     if (category !== 'All Categories' && c.category !== category) return false
     if (level !== 'All Levels' && c.level !== level) return false
+    if (format !== 'All Formats' && c.format !== format) return false
     return true
   })
 
   const handleSubmit = async () => {
-    if (!form.title || !form.category || !form.level) return
+    setFormError(null)
+    if (!form.title.trim()) return setFormError('Please add a course title.')
+    if (!form.category) return setFormError('Please select a category.')
+    if (!form.level) return setFormError('Please select a difficulty level.')
+    if (!form.thumbnail) return setFormError('Please upload a thumbnail image.')
+    if (form.blocks.length === 0) return setFormError('Add at least one section to the course body.')
+
     setSubmitting(true)
-    const media = form.mediaMode === 'embed' && form.embedUrl
-      ? { embed_url: form.embedUrl }
-      : form.mediaUrl ? { url: form.mediaUrl } : null
-    await supabase.from('courses').insert({
-      title: form.title, category: form.category, level: form.level, duration: form.duration,
-      description: form.description, instructor: form.instructor, type: form.type,
-      approved: false, author_id: user?.id, author_name: getDisplayName(profile), students: 0, media
+    const { error } = await supabase.from('courses').insert({
+      title: form.title.trim(),
+      category: form.category,
+      level: form.level,
+      format: form.format,
+      duration: form.duration,
+      description: form.description.trim(),
+      instructor: form.instructor.trim(),
+      thumbnail: form.thumbnail,
+      content_blocks: form.blocks,
+      approved: false,
+      author_id: user?.id,
+      author_name: getDisplayName(profile),
+      students: 0,
     })
     setSubmitting(false)
+    if (error) {
+      setFormError('Could not submit course: ' + error.message)
+      return
+    }
     setShowSubmit(false)
-    setForm({ title: '', category: '', level: '', duration: '', description: '', instructor: '', type: 'Course', mediaUrl: '', embedUrl: '', mediaMode: 'file' })
+    setForm(emptyForm())
     alert('Course submitted for admin approval!')
   }
 
@@ -142,8 +456,13 @@ export default function CoursesPage() {
         <select className="cyber-select sm:w-44" value={category} onChange={e => setCategory(e.target.value)}>
           {CATEGORIES.map(c => <option key={c}>{c}</option>)}
         </select>
-        <select className="cyber-select sm:w-36" value={level} onChange={e => setLevel(e.target.value)}>
+        <select className="cyber-select sm:w-40" value={level} onChange={e => setLevel(e.target.value)}>
+          <option>All Levels</option>
           {LEVELS.map(l => <option key={l}>{l}</option>)}
+        </select>
+        <select className="cyber-select sm:w-40" value={format} onChange={e => setFormat(e.target.value)}>
+          <option>All Formats</option>
+          {FORMATS.map(f => <option key={f.value} value={f.value}>{f.icon} {f.label}</option>)}
         </select>
       </div>
 
@@ -161,64 +480,85 @@ export default function CoursesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map(course => <CourseCard key={course.id} course={course} />)}
+          {filtered.map(course => <CourseCard key={course.id} course={course} onView={setViewingCourse} />)}
         </div>
+      )}
+
+      {/* Detail modal */}
+      {viewingCourse && (
+        <CourseDetailModal course={viewingCourse} onClose={() => setViewingCourse(null)} />
       )}
 
       {/* Submit Modal */}
       {showSubmit && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowSubmit(false)}>
-          <div className="modal-content p-5 sm:p-6">
+          <div className="modal-content p-5 sm:p-6" style={{ maxWidth: 640, maxHeight: '85vh', overflowY: 'auto' }}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>Submit a Course</h2>
               <button onClick={() => setShowSubmit(false)} className="theme-toggle"><X className="w-4 h-4" /></button>
             </div>
+
             <div className="space-y-3">
               <input className="cyber-input" placeholder="Course title *" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
-              <select className="cyber-select" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
-                <option value="">Select category *</option>
-                {CATEGORIES.slice(1).map(c => <option key={c}>{c}</option>)}
-              </select>
+
               <div className="grid grid-cols-2 gap-3">
-                <select className="cyber-select" value={form.level} onChange={e => setForm({ ...form, level: e.target.value })}>
-                  <option value="">Level *</option>
-                  {['100', '200', '300', '400', '500'].map(l => <option key={l}>{l} Level</option>)}
+                <select className="cyber-select" value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
+                  <option value="">Category *</option>
+                  {CATEGORIES.slice(1).map(c => <option key={c}>{c}</option>)}
                 </select>
-                <input className="cyber-input" placeholder="Duration" value={form.duration} onChange={e => setForm({ ...form, duration: e.target.value })} />
-              </div>
-              <input className="cyber-input" placeholder="Instructor name" value={form.instructor} onChange={e => setForm({ ...form, instructor: e.target.value })} />
-              <textarea className="cyber-input resize-none h-20" placeholder="Description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
-
-              {/* Media mode tabs */}
-              <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
-                {(['file', 'embed'] as const).map(m => (
-                  <button key={m} type="button" onClick={() => setForm({ ...form, mediaMode: m })}
-                    className="flex-1 py-1.5 text-xs font-medium transition-colors"
-                    style={form.mediaMode === m
-                      ? { background: 'var(--accent-dim)', color: 'var(--accent)' }
-                      : { background: 'var(--input-bg)', color: 'var(--text-muted)' }}>
-                    {m === 'file' ? '📁 Upload / URL' : '🎬 Embed Video'}
-                  </button>
-                ))}
+                <select className="cyber-select" value={form.level} onChange={e => setForm({ ...form, level: e.target.value as CourseLevel })}>
+                  <option value="">Difficulty *</option>
+                  {LEVELS.map(l => <option key={l}>{l}</option>)}
+                </select>
               </div>
 
-              {form.mediaMode === 'file' ? (
-                <FileUploader
-                  label="Course thumbnail / file (optional)"
-                  value={form.mediaUrl}
-                  onChange={url => setForm({ ...form, mediaUrl: url })}
-                  accept="image/*,.pdf,.doc,.docx"
-                />
-              ) : (
-                <div>
-                  <label className="text-xs mb-1 block" style={{ color: 'var(--text-secondary)' }}>Video Embed URL</label>
-                  <input className="cyber-input" placeholder="YouTube / Facebook / Instagram / Twitter URL"
-                    value={form.embedUrl} onChange={e => setForm({ ...form, embedUrl: e.target.value })} />
-                  <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Supports YouTube, Facebook, Instagram, Twitter/X</p>
+              <div className="grid grid-cols-2 gap-3">
+                <input className="cyber-input" placeholder="Instructor name" value={form.instructor} onChange={e => setForm({ ...form, instructor: e.target.value })} />
+                <input className="cyber-input" placeholder="Duration (e.g. 4 weeks)" value={form.duration} onChange={e => setForm({ ...form, duration: e.target.value })} />
+              </div>
+
+              <textarea className="cyber-input resize-none h-20" placeholder="Short description (shown on the course card)"
+                value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+
+              {/* Course format */}
+              <div>
+                <label className="text-xs mb-1.5 block font-semibold" style={{ color: 'var(--text-secondary)' }}>Course Format *</label>
+                <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
+                  {FORMATS.map(f => (
+                    <button key={f.value} type="button" onClick={() => setForm({ ...form, format: f.value })}
+                      className="flex-1 py-2 text-xs font-medium transition-colors"
+                      style={form.format === f.value
+                        ? { background: 'var(--accent-dim)', color: 'var(--accent)' }
+                        : { background: 'var(--input-bg)', color: 'var(--text-muted)' }}>
+                      {f.icon} {f.label}
+                    </button>
+                  ))}
                 </div>
+              </div>
+
+              {/* Thumbnail (required) */}
+              <div>
+                <label className="text-xs mb-1.5 block font-semibold" style={{ color: 'var(--text-secondary)' }}>Course Thumbnail *</label>
+                <FileUploader
+                  label=""
+                  value={form.thumbnail}
+                  onChange={url => setForm({ ...form, thumbnail: url })}
+                  accept="image/*"
+                />
+              </div>
+
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                <BlockEditor blocks={form.blocks} setBlocks={blocks => setForm({ ...form, blocks })} />
+              </div>
+
+              {formError && (
+                <p className="text-xs rounded-lg p-2" style={{ color: '#ef4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)' }}>
+                  {formError}
+                </p>
               )}
             </div>
-            <div className="flex gap-3 mt-4">
+
+            <div className="flex gap-3 mt-5">
               <button onClick={handleSubmit} disabled={submitting} className="cyber-btn flex-1">
                 {submitting ? 'Submitting...' : 'Submit for Review'}
               </button>
