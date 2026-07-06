@@ -163,6 +163,7 @@ export default function ElectionVoting({ onBack, settings }: {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [savingFor, setSavingFor] = useState<string | null>(null)
+  const [voteError, setVoteError] = useState<string | null>(null)
   const [openPositions, setOpenPositions] = useState<Record<string, boolean>>({})
   const [justSubmitted, setJustSubmitted] = useState(false)
   const [showCongratsPopup, setShowCongratsPopup] = useState(false)
@@ -232,45 +233,72 @@ export default function ElectionVoting({ onBack, settings }: {
     setLoading(false)
   }
 
+  // ─── Optimistic vote toggle ───────────────────────────────────────────────
+  // The UI updates immediately on click (instant checkmark + card highlight).
+  // The network call runs in the background; a small spinner shows inside the
+  // checkbox while it confirms, and the change is only rolled back if the
+  // request actually fails.
   const toggleVote = async (position: string, candidateId: string) => {
     if (!user || hasSubmitted) return
+    if (savingFor) return // avoid overlapping requests if a previous vote is still confirming
+
     const currentSet = myVotes[position] || new Set<string>()
     const alreadyVoted = currentSet.has(candidateId)
     const hasExistingVote = currentSet.size > 0
     if (!settings.allowChanges && hasExistingVote && !alreadyVoted) return
 
-    setSavingFor(candidateId)
+    // Snapshot for rollback
+    const previousVotes = myVotes
+
+    // 1) Update UI instantly
+    const optimisticVotes: VoteMap = { ...myVotes }
+    if (alreadyVoted) {
+      delete optimisticVotes[position]
+    } else {
+      optimisticVotes[position] = new Set([candidateId])
+    }
+    setMyVotes(optimisticVotes)
+    setVoteError(null)
     setAnimating(candidateId)
     setTimeout(() => setAnimating(null), 600)
+    setSavingFor(candidateId)
 
-    if (alreadyVoted) {
-      await supabase.from('election_votes').delete()
-        .eq('voter_id', user.id).eq('position', position).eq('candidate_id', candidateId)
-      setMyVotes(prev => {
-        const next = { ...prev }
-        delete next[position]
-        return next
-      })
-    } else {
-      if (hasExistingVote) {
-        await supabase.from('election_votes').delete()
-          .eq('voter_id', user.id).eq('position', position)
+    // 2) Confirm with the server in the background
+    try {
+      if (alreadyVoted) {
+        const { error } = await supabase.from('election_votes').delete()
+          .eq('voter_id', user.id).eq('position', position).eq('candidate_id', candidateId)
+        if (error) throw error
+      } else {
+        if (hasExistingVote) {
+          const { error: delErr } = await supabase.from('election_votes').delete()
+            .eq('voter_id', user.id).eq('position', position)
+          if (delErr) throw delErr
+        }
+        const { error: insErr } = await supabase.from('election_votes')
+          .insert({ voter_id: user.id, position, candidate_id: candidateId })
+        if (insErr) throw insErr
       }
-      await supabase.from('election_votes').insert({ voter_id: user.id, position, candidate_id: candidateId })
-      setMyVotes(prev => {
-        const next = { ...prev }
-        next[position] = new Set([candidateId])
-        return next
-      })
+    } catch (err) {
+      // 3) Roll back only if it actually failed
+      setMyVotes(previousVotes)
+      setVoteError('Could not save your vote. Check your connection and try again.')
+      setTimeout(() => setVoteError(null), 4000)
+    } finally {
+      setSavingFor(null)
     }
-    setSavingFor(null)
   }
 
   const submitBallot = async () => {
     if (!user || hasSubmitted) return
     if (!confirm('Submit your ballot? This cannot be undone.')) return
     setSubmitting(true)
-    await supabase.from('election_submissions').insert({ voter_id: user.id })
+    const { error } = await supabase.from('election_submissions').insert({ voter_id: user.id })
+    if (error) {
+      setSubmitting(false)
+      alert('Could not submit your ballot. Please check your connection and try again.')
+      return
+    }
     setHasSubmitted(true)
     setJustSubmitted(true)
     setShowCongratsPopup(true)
@@ -281,7 +309,6 @@ export default function ElectionVoting({ onBack, settings }: {
 
   const handleViewLiveCount = () => {
     setShowCongratsPopup(false)
-    // Scroll to live count section (already rendered in post-submission view)
     setTimeout(() => {
       const el = document.getElementById('live-count-section')
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -517,9 +544,26 @@ export default function ElectionVoting({ onBack, settings }: {
         }
         .checkbox-pop { animation: checkbox-pop 0.3s ease; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes toast-in {
+          0% { transform: translate(-50%, 12px); opacity: 0; }
+          100% { transform: translate(-50%, 0); opacity: 1; }
+        }
+        .vote-error-toast { animation: toast-in 0.25s ease; }
       `}</style>
 
       <TopBar />
+
+      {/* Vote error toast — only appears if a save actually fails */}
+      {voteError && (
+        <div className="vote-error-toast" style={{
+          position: 'fixed', bottom: 20, left: '50%', zIndex: 9998,
+          background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c',
+          borderRadius: 12, padding: '10px 18px', fontSize: 13, fontWeight: 600,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.12)', maxWidth: '90%', textAlign: 'center',
+        }}>
+          ⚠️ {voteError}
+        </div>
+      )}
 
       <div className="max-w-2xl mx-auto px-4 py-6">
 
@@ -636,21 +680,23 @@ export default function ElectionVoting({ onBack, settings }: {
                         const pct = total > 0 ? Math.round((count / total) * 100) : 0
                         const isAnimating = animating === candidate.id
                         const isSaving = savingFor === candidate.id
+                        const isDisabled = !canVote || (!!savingFor && savingFor !== candidate.id)
 
                         return (
                           <div key={candidate.id}
-                            onClick={() => canVote && toggleVote(position, candidate.id)}
+                            onClick={() => !isDisabled && toggleVote(position, candidate.id)}
                             className={isAnimating ? 'vote-animate' : ''}
                             style={{
                               background: isSelected ? 'linear-gradient(135deg, #eff6ff, #dbeafe)' : '#f8fafc',
                               border: `2px solid ${isSelected ? '#1a9ef4' : '#e8eef6'}`,
                               borderRadius: 14, padding: '12px 14px',
-                              cursor: canVote ? 'pointer' : 'default',
-                              transition: 'border-color 0.2s, background 0.2s',
+                              cursor: isDisabled ? 'default' : 'pointer',
+                              opacity: isDisabled && !isSelected ? 0.6 : 1,
+                              transition: 'border-color 0.2s, background 0.2s, opacity 0.2s',
                               userSelect: 'none',
                             }}>
                             <div className="flex items-center gap-3">
-                              <div className={isSelected ? 'checkbox-pop' : ''}
+                              <div className={isSelected && !isSaving ? 'checkbox-pop' : ''}
                                 style={{
                                   width: 22, height: 22, borderRadius: 6, flexShrink: 0,
                                   background: isSelected ? '#1a9ef4' : '#fff',
