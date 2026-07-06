@@ -221,6 +221,15 @@ function PostCard({ post, currentUserId, isAdmin, onDelete, onLike, highlighted 
     }
   }, [highlighted])
 
+  // ── FIX ────────────────────────────────────────────────────────────────
+  // Previously this only fetched comments once `showComments` became true
+  // (i.e. after the user clicked the comment button), which meant the
+  // comment-count badge next to the icon always read 0 until the thread
+  // was opened. Fetching on mount instead means the count is correct as
+  // soon as the post renders. We still keep the `showComments` toggle for
+  // whether the actual list is displayed, and re-fetch on expand to make
+  // sure it's fresh.
+  useEffect(() => { fetchComments() }, [post.id])
   useEffect(() => { if (showComments) fetchComments() }, [showComments])
 
   // Detect whether the post text overflows 4 lines, to decide if "Read more" is needed
