@@ -1,23 +1,42 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Search, BookOpen, Plus, Star, Users, Clock, X, Play,
   GripVertical, Trash2, ArrowUp, ArrowDown, Type, Heading as HeadingIcon,
-  Image as ImageIcon, Film, Eye,
+  Image as ImageIcon, Film, Eye, Share2, Link2, Facebook, Twitter,
+  MessageCircle, Instagram, Check, LogIn,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth, getDisplayName } from '../contexts/AuthContext'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useLocation } from 'react-router-dom'
 import FileUploader from '../components/FileUploader'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NOTE ON SCHEMA: this page now expects the following columns on `courses`
-// (in addition to what already existed): 
+// (in addition to what already existed):
 //   level            text        -- 'Beginner' | 'Intermediate' | 'Advanced'
 //   format           text        -- 'text' | 'video' | 'text_video'
 //   thumbnail        text        -- required cover image URL
 //   content_blocks   jsonb        -- ordered array of ContentBlock (see below)
+//   views            integer      -- default 0, incremented on each course view
 // The old free-form `topics`/`type`/`media` fields are no longer written to,
 // but are left alone in case older rows still use them.
+//
+// MIGRATION NEEDED for view counting (run in Supabase SQL editor):
+//
+//   alter table courses add column if not exists views integer default 0;
+//
+//   create or replace function increment_course_views(course_id uuid)
+//   returns void
+//   language sql
+//   security definer
+//   as $$
+//     update courses set views = coalesce(views, 0) + 1 where id = course_id;
+//   $$;
+//
+//   -- Following the established pattern for this project: a policy/grant is
+//   -- useless without the other. Grant execute to anon AND authenticated so
+//   -- guests viewing a shared link also register as a view.
+//   grant execute on function increment_course_views(uuid) to anon, authenticated;
 // ─────────────────────────────────────────────────────────────────────────────
 
 type BlockType = 'heading' | 'paragraph' | 'image' | 'video'
@@ -48,6 +67,7 @@ interface Course {
   approved: boolean
   students: number
   rating: number
+  views: number
   author_name: string
   author_id?: string
   created_at: string
@@ -78,6 +98,101 @@ const levelColor = (level: string) => {
 }
 
 const formatMeta = (format: string) => FORMATS.find(f => f.value === format) || FORMATS[2]
+
+// ── Builds the canonical shareable URL for a course ─────────────────────────────
+function getCourseShareUrl(courseId: string) {
+  return `${window.location.origin}/courses/${courseId}`
+}
+
+// ── Share dropdown: WhatsApp, X, Facebook, Instagram (copy), Copy Link ───────────
+function ShareMenu({ courseId, title, variant = 'icon' }: { courseId: string; title: string; variant?: 'icon' | 'full' }) {
+  const [open, setOpen] = useState(false)
+  const [copiedLabel, setCopiedLabel] = useState<string | null>(null)
+
+  const shareUrl = getCourseShareUrl(courseId)
+  const shareText = `Check out "${title}"`
+
+  const copyLink = async (label: string) => {
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+    } catch {
+      window.prompt('Copy this link:', shareUrl)
+    }
+    setCopiedLabel(label)
+    setTimeout(() => setCopiedLabel(null), 2000)
+  }
+
+  const handleNativeShare = async () => {
+    if (typeof navigator !== 'undefined' && (navigator as any).share) {
+      try {
+        await (navigator as any).share({ title, text: shareText, url: shareUrl })
+        setOpen(false)
+      } catch {
+        // user cancelled the native share sheet — no-op
+      }
+    }
+  }
+
+  const externalLinks = [
+    { label: 'WhatsApp', icon: <MessageCircle className="w-4 h-4" />, href: `https://wa.me/?text=${encodeURIComponent(`${shareText} ${shareUrl}`)}` },
+    { label: 'X', icon: <Twitter className="w-4 h-4" />, href: `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}` },
+    { label: 'Facebook', icon: <Facebook className="w-4 h-4" />, href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}` },
+  ]
+
+  return (
+    <div className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className={variant === 'full' ? 'cyber-btn-ghost text-xs flex items-center gap-1.5' : 'p-1.5 rounded-lg'}
+        style={variant === 'icon' ? { color: 'var(--text-secondary)', background: 'var(--input-bg)', border: '1px solid var(--border)' } : undefined}
+        title="Share this course"
+      >
+        <Share2 className="w-3.5 h-3.5" /> {variant === 'full' && 'Share'}
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-2 z-20 rounded-lg p-2 space-y-0.5"
+            style={{ background: 'var(--input-bg)', border: '1px solid var(--border)', minWidth: 190, boxShadow: '0 8px 24px rgba(0,0,0,0.3)' }}>
+            {typeof navigator !== 'undefined' && (navigator as any).share && (
+              <button type="button" onClick={handleNativeShare}
+                className="w-full flex items-center gap-2 text-xs px-2 py-1.5 rounded"
+                style={{ color: 'var(--text-primary)' }}>
+                <Share2 className="w-4 h-4" /> Share via...
+              </button>
+            )}
+            {externalLinks.map(l => (
+              <a key={l.label} href={l.href} target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)}
+                className="w-full flex items-center gap-2 text-xs px-2 py-1.5 rounded"
+                style={{ color: 'var(--text-primary)' }}>
+                {l.icon} {l.label}
+              </a>
+            ))}
+            <button type="button" onClick={() => copyLink('instagram')}
+              className="w-full flex items-center gap-2 text-xs px-2 py-1.5 rounded"
+              style={{ color: 'var(--text-primary)' }}>
+              {copiedLabel === 'instagram' ? <Check className="w-4 h-4" style={{ color: '#10b981' }} /> : <Instagram className="w-4 h-4" />}
+              {copiedLabel === 'instagram' ? 'Link copied!' : 'Instagram'}
+            </button>
+            <button type="button" onClick={() => copyLink('link')}
+              className="w-full flex items-center gap-2 text-xs px-2 py-1.5 rounded"
+              style={{ color: 'var(--text-primary)' }}>
+              {copiedLabel === 'link' ? <Check className="w-4 h-4" style={{ color: '#10b981' }} /> : <Link2 className="w-4 h-4" />}
+              {copiedLabel === 'link' ? 'Copied!' : 'Copy Link'}
+            </button>
+            {copiedLabel === 'instagram' && (
+              <div className="text-[10px] px-2 pt-1" style={{ color: 'var(--text-muted)' }}>
+                Instagram doesn't support pre-filled links — paste it into your bio, a story, or a DM.
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
 
 // ── Renders an ordered list of content blocks (read-only, used in the detail view) ──
 function BlockRenderer({ blocks }: { blocks: ContentBlock[] }) {
@@ -131,6 +246,21 @@ function BlockRenderer({ blocks }: { blocks: ContentBlock[] }) {
 // ── Course card (grid item) ─────────────────────────────────────────────────────
 function CourseCard({ course }: { course: Course }) {
   const navigate = useNavigate()
+  const location = useLocation()
+  const { user } = useAuth()
+
+  const handleView = () => {
+    const path = `/courses/${course.id}`
+    if (!user) {
+      // Not registered / signed in — send them to sign in first, and remember
+      // where they were trying to go so the login/sign-up flow can bounce
+      // them back to this exact course afterwards.
+      navigate('/login', { state: { from: path } })
+      return
+    }
+    navigate(path)
+  }
+
   return (
     <div className="glass-card p-4 sm:p-5 flex flex-col hover-lift">
       <div className="relative mb-3">
@@ -145,6 +275,9 @@ function CourseCard({ course }: { course: Course }) {
           style={{ background: 'rgba(0,0,0,0.6)', color: '#fff' }}>
           {formatMeta(course.format).icon} {formatMeta(course.format).label}
         </span>
+        <div className="absolute top-2 right-2">
+          <ShareMenu courseId={course.id} title={course.title} variant="icon" />
+        </div>
       </div>
 
       <div className="flex items-start justify-between gap-2 mb-2 flex-wrap">
@@ -162,12 +295,21 @@ function CourseCard({ course }: { course: Course }) {
       <div className="flex items-center gap-3 text-xs mt-auto mb-2" style={{ color: 'var(--text-muted)' }}>
         <span className="flex items-center gap-1"><Users className="w-3 h-3" />{course.students || 0}</span>
         {course.duration && <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{course.duration}</span>}
+        <span className="flex items-center gap-1"><Eye className="w-3 h-3" />{course.views || 0}</span>
         {course.rating ? <span className="flex items-center gap-1"><Star className="w-3 h-3 text-yellow-400 fill-current" />{course.rating}</span> : null}
       </div>
       <div className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>By {course.instructor || course.author_name}</div>
 
-      <button onClick={() => navigate(`/courses/${course.id}`)} className="cyber-btn-ghost text-xs w-full flex items-center justify-center gap-1.5">
-        <Eye className="w-3.5 h-3.5" /> View Course
+      <button onClick={handleView} className="cyber-btn-ghost text-xs w-full flex items-center justify-center gap-1.5">
+        {user ? (
+          <>
+            <Eye className="w-3.5 h-3.5" /> View Course
+          </>
+        ) : (
+          <>
+            <LogIn className="w-3.5 h-3.5" /> Sign In to View
+          </>
+        )}
       </button>
     </div>
   )
@@ -176,12 +318,27 @@ function CourseCard({ course }: { course: Course }) {
 // ── Detail page (full page, not a modal) ─────────────────────────────────────────
 // Mount this at a route like <Route path="/courses/:id" element={<CourseDetailPage />} />
 // in your router (e.g. App.tsx / routes file) alongside the existing <CoursesPage /> route.
+// Because this route is keyed off the course id, any shared link (WhatsApp, X,
+// Facebook, Instagram, or a raw copied URL) lands the visitor directly on this
+// exact course page — no extra routing work needed beyond what's already here.
 export function CourseDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
+  const { user } = useAuth()
   const [course, setCourse] = useState<Course | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const hasCountedView = useRef(false)
+
+  // Gate the whole detail page behind sign in / sign up, same as the "View
+  // Course" button on the card — this also covers people who land here
+  // straight from a shared link without ever touching the courses grid.
+  useEffect(() => {
+    if (!user) {
+      navigate('/login', { state: { from: location.pathname } })
+    }
+  }, [user, navigate, location.pathname])
 
   useEffect(() => {
     let cancelled = false
@@ -197,9 +354,27 @@ export function CourseDetailPage() {
       }
       setLoading(false)
     }
-    if (id) fetchCourse()
+    if (id && user) fetchCourse()
     return () => { cancelled = true }
-  }, [id])
+  }, [id, user])
+
+  // Count a view once the course has successfully loaded. The ref guard stops
+  // duplicate increments from React re-renders / effect double-invocation.
+  useEffect(() => {
+    if (!course || hasCountedView.current) return
+    hasCountedView.current = true
+    supabase.rpc('increment_course_views', { course_id: course.id }).then(({ error }) => {
+      if (error) {
+        console.error('Failed to record course view:', error.message)
+        return
+      }
+      setCourse(prev => prev ? { ...prev, views: (prev.views || 0) + 1 } : prev)
+    })
+  }, [course])
+
+  if (!user) {
+    return null // redirect effect above will kick in
+  }
 
   if (loading) {
     return (
@@ -221,9 +396,12 @@ export function CourseDetailPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
-      <button onClick={() => navigate('/courses')} className="cyber-btn-ghost text-xs mb-4 inline-flex items-center gap-1.5">
-        ← Back to Courses
-      </button>
+      <div className="flex items-center justify-between mb-4">
+        <button onClick={() => navigate('/courses')} className="cyber-btn-ghost text-xs inline-flex items-center gap-1.5">
+          ← Back to Courses
+        </button>
+        <ShareMenu courseId={course.id} title={course.title} variant="full" />
+      </div>
 
       <div className="glass-card p-0 overflow-hidden">
         <div className="relative">
@@ -250,9 +428,10 @@ export function CourseDetailPage() {
           </div>
 
           <h1 className="font-bold text-2xl sm:text-3xl mb-1" style={{ color: 'var(--text-primary)' }}>{course.title}</h1>
-          <div className="text-xs mb-5" style={{ color: 'var(--text-muted)' }}>
+          <div className="text-xs mb-5 flex items-center gap-1 flex-wrap" style={{ color: 'var(--text-muted)' }}>
             By {course.instructor || course.author_name}
             {course.duration && <> · {course.duration}</>}
+            <> · <Eye className="w-3 h-3 inline" /> {course.views || 0} views</>
           </div>
 
           {course.description && (
@@ -455,6 +634,7 @@ export default function CoursesPage() {
       author_id: user?.id,
       author_name: getDisplayName(profile),
       students: 0,
+      views: 0,
     })
     setSubmitting(false)
     if (error) {
