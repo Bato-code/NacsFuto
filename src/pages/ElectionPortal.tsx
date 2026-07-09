@@ -100,18 +100,19 @@ function ElectionResults({ onBack }: { onBack: () => void }) {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  // ── FIX (1): total voter count now comes from the get_total_voters() RPC
+  // ── FIX (1): real voter count now comes from the get_total_voters() RPC
   // instead of `.select('id')` on election_submissions. Regular voters can
   // only see their own submission row under RLS, so a plain select
-  // undercounted for everyone except admins — same issue already fixed in
-  // ElectionVoting.tsx.
+  // undercounted for everyone except admins.
   //
-  // ── FIX (2): candidate + total vote counts now merge in each candidate's
+  // ── FIX (2): candidate + total vote counts merge in each candidate's
   // `contribution` (sponsor-added votes from the admin sponsorship panel),
-  // the same way ElectionVoting.tsx's fetchLiveCounts() already does.
-  // Previously this page only counted rows in `election_votes`, so
-  // sponsorship votes never showed up here even though they showed up on
-  // the live voting page.
+  // same as ElectionVoting.tsx's fetchLiveCounts().
+  //
+  // ── FIX (3): per admin decision, each sponsor-added vote also counts as
+  // a "voter" — so totalVoters = real submissions (via RPC) + sum of all
+  // candidate contributions. Sponsor votes aren't tied to a real
+  // election_submissions row, so they have to be added on top manually.
   const fetchResults = async () => {
     setLoading(true)
     const [{ data: cands }, { data: votes }, { data: voterCount }] = await Promise.all([
@@ -121,10 +122,11 @@ function ElectionResults({ onBack }: { onBack: () => void }) {
     ])
     const counts: Record<string, number> = {}
     ;(votes || []).forEach((v: any) => { counts[v.candidate_id] = (counts[v.candidate_id] || 0) + 1 })
+    const totalContributions = (cands || []).reduce((s: number, c: any) => s + (c.contribution || 0), 0)
     ;(cands || []).forEach((c: any) => { counts[c.id] = (counts[c.id] || 0) + (c.contribution || 0) })
     setCandidates(cands || [])
     setVoteCounts(counts)
-    setTotalVoters(voterCount ?? 0)
+    setTotalVoters((voterCount ?? 0) + totalContributions)
     const expanded: Record<string, boolean> = {}
     POSITIONS.forEach(p => { expanded[p] = true })
     setExpandedPositions(expanded)
