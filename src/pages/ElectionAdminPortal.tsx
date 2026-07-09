@@ -209,13 +209,20 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
   }
   const candidatesForPosition = (position: string) => candidates.filter(c => c.position === position)
 
+  // Sum of all sponsor-added votes across every candidate.
+  const totalContributions = candidates.reduce((s, c) => s + (c.contribution ?? 0), 0)
+
   // ── FIX: this used to just be `votes.length`, which only counts rows in
   // election_votes and ignores sponsor-added `contribution` amounts. Every
   // per-candidate count on this page already includes contribution via
-  // voteCountFor(), so the summary total needs to match — otherwise the
-  // headline number (Overview / Live Count / Final Result) undercounts
-  // whenever sponsorship votes are added from the Sponsorship admin panel.
-  const totalVotesCast = votes.length + candidates.reduce((s, c) => s + (c.contribution ?? 0), 0)
+  // voteCountFor(), so the summary total needs to match.
+  const totalVotesCast = votes.length + totalContributions
+
+  // ── FIX: "Total Voters" used to be just `submissions.length` (real
+  // ballot submissions). Per admin request, each sponsor-added vote should
+  // also count as a "voter" — so this now adds totalContributions on top of
+  // real submissions.
+  const totalVoters = submissions.length + totalContributions
 
   const navItems: { id: AdminView; label: string; icon: any }[] = [
     { id: 'overview', label: 'Overview', icon: BarChart2 },
@@ -302,7 +309,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                 <StatCard value={activeCandidates.length} label="ACTIVE" />
                 <StatCard value={suspendedCandidates.length} label="SUSPENDED" color="#ef4444" />
                 <StatCard value={disqualifiedCandidates.length} label="DISQUALIFIED" color="#f59e0b" />
-                <StatCard value={submissions.length} label="VOTERS" color="#10b981" />
+                <StatCard value={totalVoters} label="VOTERS" color="#10b981" />
               </div>
               <div className="grid grid-cols-2 gap-3 mb-5">
                 <StatCard value={totalVotesCast} label="TOTAL VOTES CAST" color="#8b5cf6" />
@@ -547,7 +554,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
 
               <div className="grid grid-cols-2 gap-3 mb-5">
                 <div className="rounded-2xl p-4" style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                  <div className="text-2xl font-bold" style={{ color: '#10b981' }}>{submissions.length}</div>
+                  <div className="text-2xl font-bold" style={{ color: '#10b981' }}>{totalVoters}</div>
                   <div className="text-xs font-medium mt-1" style={{ color: '#94a3b8' }}>TOTAL VOTERS</div>
                 </div>
                 <div className="rounded-2xl p-4" style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
@@ -629,7 +636,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
 
               <div className="grid grid-cols-2 gap-3 mb-5">
                 <div className="rounded-2xl p-4" style={{ background: '#fff', border: '1px solid #e8eef6' }}>
-                  <div className="text-2xl font-bold" style={{ color: '#10b981' }}>{submissions.length}</div>
+                  <div className="text-2xl font-bold" style={{ color: '#10b981' }}>{totalVoters}</div>
                   <div className="text-xs font-medium mt-1" style={{ color: '#94a3b8' }}>TOTAL VOTERS</div>
                 </div>
                 <div className="rounded-2xl p-4" style={{ background: '#fff', border: '1px solid #e8eef6' }}>
