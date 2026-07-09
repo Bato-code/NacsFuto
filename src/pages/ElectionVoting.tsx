@@ -189,11 +189,16 @@ export default function ElectionVoting({ onBack, settings }: {
     realtimeRef.current = channel
   }
 
-  // ── FIX: total voter count now comes from the get_total_voters() RPC
-  // instead of `.select('id')` on election_submissions. That table's RLS
-  // only lets a regular voter see their own row (or all rows if admin),
-  // so a plain select undercounted for everyone except admins. The RPC
-  // is SECURITY DEFINER and returns only a count, never row-level data.
+  // ── FIX: total voter count comes from the get_total_voters() RPC instead
+  // of `.select('id')` on election_submissions. That table's RLS only lets
+  // a regular voter see their own row (or all rows if admin), so a plain
+  // select undercounted for everyone except admins. The RPC is SECURITY
+  // DEFINER and returns only a count, never row-level data.
+  //
+  // ── FIX: per admin decision, each sponsor-added `contribution` vote also
+  // counts as a "voter" in this total — since those votes aren't tied to a
+  // real election_submissions row, the contribution sum is added on top of
+  // the RPC's real-submission count.
   const fetchLiveCounts = async () => {
     const [{ data: allVotes }, { data: voterCount }, { data: cands }] = await Promise.all([
       supabase.from('election_votes').select('candidate_id'),
@@ -202,9 +207,10 @@ export default function ElectionVoting({ onBack, settings }: {
     ])
     const r: Record<string, number> = {}
     ;(allVotes || []).forEach((v: any) => { r[v.candidate_id] = (r[v.candidate_id] || 0) + 1 })
+    const totalContributions = (cands || []).reduce((s: number, c: any) => s + (c.contribution || 0), 0)
     ;(cands || []).forEach((c: any) => { r[c.id] = (r[c.id] || 0) + (c.contribution || 0) })
     setResults(r)
-    setTotalVoters(voterCount ?? 0)
+    setTotalVoters((voterCount ?? 0) + totalContributions)
   }
 
   const fetchAll = async () => {
