@@ -209,6 +209,14 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
   }
   const candidatesForPosition = (position: string) => candidates.filter(c => c.position === position)
 
+  // ── FIX: this used to just be `votes.length`, which only counts rows in
+  // election_votes and ignores sponsor-added `contribution` amounts. Every
+  // per-candidate count on this page already includes contribution via
+  // voteCountFor(), so the summary total needs to match — otherwise the
+  // headline number (Overview / Live Count / Final Result) undercounts
+  // whenever sponsorship votes are added from the Sponsorship admin panel.
+  const totalVotesCast = votes.length + candidates.reduce((s, c) => s + (c.contribution ?? 0), 0)
+
   const navItems: { id: AdminView; label: string; icon: any }[] = [
     { id: 'overview', label: 'Overview', icon: BarChart2 },
     { id: 'candidates', label: 'Candidates', icon: Users },
@@ -297,7 +305,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                 <StatCard value={submissions.length} label="VOTERS" color="#10b981" />
               </div>
               <div className="grid grid-cols-2 gap-3 mb-5">
-                <StatCard value={votes.length} label="TOTAL VOTES CAST" color="#8b5cf6" />
+                <StatCard value={totalVotesCast} label="TOTAL VOTES CAST" color="#8b5cf6" />
                 <StatCard value={POSITIONS.filter(p => candidates.some(c => c.position === p)).length} label="ACTIVE POSITIONS" color="#1a9ef4" />
               </div>
 
@@ -543,7 +551,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                   <div className="text-xs font-medium mt-1" style={{ color: '#94a3b8' }}>TOTAL VOTERS</div>
                 </div>
                 <div className="rounded-2xl p-4" style={{ background: '#fff', border: '1px solid #e8eef6', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                  <div className="text-2xl font-bold" style={{ color: '#8b5cf6' }}>{votes.length}</div>
+                  <div className="text-2xl font-bold" style={{ color: '#8b5cf6' }}>{totalVotesCast}</div>
                   <div className="text-xs font-medium mt-1" style={{ color: '#94a3b8' }}>TOTAL VOTES CAST</div>
                 </div>
               </div>
@@ -625,7 +633,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
                   <div className="text-xs font-medium mt-1" style={{ color: '#94a3b8' }}>TOTAL VOTERS</div>
                 </div>
                 <div className="rounded-2xl p-4" style={{ background: '#fff', border: '1px solid #e8eef6' }}>
-                  <div className="text-2xl font-bold" style={{ color: '#8b5cf6' }}>{votes.length}</div>
+                  <div className="text-2xl font-bold" style={{ color: '#8b5cf6' }}>{totalVotesCast}</div>
                   <div className="text-xs font-medium mt-1" style={{ color: '#94a3b8' }}>TOTAL VOTES CAST</div>
                 </div>
               </div>
