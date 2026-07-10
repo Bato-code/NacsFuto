@@ -100,28 +100,33 @@ function ElectionResults({ onBack }: { onBack: () => void }) {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  // ── FIX (1): real voter count now comes from the get_total_voters() RPC
-  // instead of `.select('id')` on election_submissions. Regular voters can
-  // only see their own submission row under RLS, so a plain select
-  // undercounted for everyone except admins.
+  // ── FIX (1): vote counts now come from the get_vote_counts() RPC instead
+  // of `.select('candidate_id')` on election_votes. Regular voters can only
+  // see their OWN vote rows under RLS (or all rows if admin), so a plain
+  // select undercounted for every non-admin voter — capping the count at
+  // whatever that single voter had cast, instead of the whole electorate.
   //
-  // ── FIX (2): candidate + total vote counts merge in each candidate's
+  // ── FIX (2): real voter count comes from the get_total_voters() RPC
+  // instead of `.select('id')` on election_submissions, for the same RLS
+  // reason.
+  //
+  // ── FIX (3): candidate + total vote counts merge in each candidate's
   // `contribution` (sponsor-added votes from the admin sponsorship panel),
   // same as ElectionVoting.tsx's fetchLiveCounts().
   //
-  // ── FIX (3): per admin decision, each sponsor-added vote also counts as
+  // ── FIX (4): per admin decision, each sponsor-added vote also counts as
   // a "voter" — so totalVoters = real submissions (via RPC) + sum of all
   // candidate contributions. Sponsor votes aren't tied to a real
   // election_submissions row, so they have to be added on top manually.
   const fetchResults = async () => {
     setLoading(true)
-    const [{ data: cands }, { data: votes }, { data: voterCount }] = await Promise.all([
+    const [{ data: cands }, { data: voteCounts }, { data: voterCount }] = await Promise.all([
       supabase.from('election_candidates').select('*').order('created_at'),
-      supabase.from('election_votes').select('candidate_id'),
+      supabase.rpc('get_vote_counts'),
       supabase.rpc('get_total_voters'),
     ])
     const counts: Record<string, number> = {}
-    ;(votes || []).forEach((v: any) => { counts[v.candidate_id] = (counts[v.candidate_id] || 0) + 1 })
+    ;(voteCounts || []).forEach((v: any) => { counts[v.candidate_id] = Number(v.vote_count) })
     const totalContributions = (cands || []).reduce((s: number, c: any) => s + (c.contribution || 0), 0)
     ;(cands || []).forEach((c: any) => { counts[c.id] = (counts[c.id] || 0) + (c.contribution || 0) })
     setCandidates(cands || [])
