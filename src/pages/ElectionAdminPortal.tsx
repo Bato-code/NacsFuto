@@ -71,13 +71,10 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   // ── FIX: admin portal previously fetched candidates/votes/submissions
-  // ONCE on mount (`useEffect(() => { fetchAll() }, [])`) with no realtime
-  // subscription — unlike ElectionVoting.tsx and ElectionResults, which both
-  // subscribe to postgres_changes. That meant totalVoters/totalVotesCast
-  // (derived from that one-time snapshot) froze the moment you opened the
-  // Admin tab and never updated again until you left and re-entered the view.
-  // Adding the same realtime subscription pattern here so fetchAll() re-runs
-  // whenever election_votes, election_submissions, or election_candidates change.
+  // ONCE on mount with no realtime subscription — unlike ElectionVoting.tsx
+  // and ElectionResults, which both subscribe to postgres_changes. Adding the
+  // same realtime subscription pattern here so fetchAll() re-runs whenever
+  // election_votes, election_submissions, or election_candidates change.
   useEffect(() => {
     fetchAll()
     const channel = supabase
@@ -171,13 +168,30 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
     setCandidates(prev => prev.map(c => c.id === id ? { ...c, status: 'disqualified' } : c))
   }
 
+  // ── FIX: previously fired two unchecked delete calls back-to-back. If the
+  // election_votes delete was silently blocked by RLS (no admin DELETE policy
+  // existed), it would do nothing while the candidate row still got deleted —
+  // leaving orphaned vote rows that inflated "Total Votes Cast" beyond what the
+  // per-candidate numbers added up to. Now each delete is checked and any
+  // failure is surfaced instead of swallowed, and votes are removed first.
   const deleteCandidate = async (id: string) => {
     if (!confirm('Delete this candidate and their votes?')) return
-    await supabase.from('election_votes').delete().eq('candidate_id', id)
-    await supabase.from('election_candidates').delete().eq('id', id)
+    const { error: voteErr } = await supabase.from('election_votes').delete().eq('candidate_id', id)
+    if (voteErr) {
+      alert("Could not delete this candidate's votes: " + voteErr.message)
+      return
+    }
+    const { error: candErr } = await supabase.from('election_candidates').delete().eq('id', id)
+    if (candErr) {
+      alert('Could not delete candidate: ' + candErr.message)
+      return
+    }
     fetchAll()
   }
 
+  // ── FIX: same silent-failure risk as deleteCandidate — now checks each
+  // delete/update result and surfaces a clear error if any part fails,
+  // instead of assuming success and leaving stale data behind.
   const resetVotes = async () => {
     if (!confirm('Reset ALL votes and submissions? This cannot be undone.')) return
     setResettingVotes(true)
@@ -190,6 +204,7 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
       const failed = results.find(r => r.error)
       if (failed?.error) {
         alert('Reset partially failed: ' + failed.error.message)
+        return
       }
     } finally {
       await fetchAll()
@@ -223,8 +238,17 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
   }
   const candidatesForPosition = (position: string) => candidates.filter(c => c.position === position)
 
+  // ── FIX: totalVotesCast now only counts votes whose candidate_id still
+  // matches an existing candidate. Previously `votes.length` counted every
+  // row in election_votes, including any orphaned rows left behind by a
+  // candidate deletion that didn't fully clean up (see deleteCandidate above
+  // and the FK/RLS fix in the accompanying SQL). This is a defensive filter —
+  // it's now backed by a real ON DELETE CASCADE foreign key in the DB, but
+  // keeping the filter here too means the UI stays correct even if data ever
+  // drifts again for any reason.
+  const validCandidateIds = new Set(candidates.map(c => c.id))
   const totalContributions = candidates.reduce((s, c) => s + (c.contribution ?? 0), 0)
-  const totalVotesCast = votes.length + totalContributions
+  const totalVotesCast = votes.filter(v => validCandidateIds.has(v.candidate_id)).length + totalContributions
   const totalVoters = submissions.length + totalContributions
 
   const navItems: { id: AdminView; label: string; icon: any }[] = [
