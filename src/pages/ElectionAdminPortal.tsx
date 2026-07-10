@@ -63,13 +63,32 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
   const [resettingVotes, setResettingVotes] = useState(false)
   const [contributionInput, setContributionInput] = useState<Record<string, string>>({})
   const [savingContribution, setSavingContribution] = useState<Record<string, boolean>>({})
+  const realtimeRef = useRef<any>(null)
 
   const [drafts, setDrafts] = useState<Record<string, { name: string; image_url: string; imagePreview: string | null; uploading: boolean; saving: boolean }>>(
     () => Object.fromEntries(POSITIONS.map(p => [p, { name: '', image_url: '', imagePreview: null, uploading: false, saving: false }]))
   )
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
-  useEffect(() => { fetchAll() }, [])
+  // ── FIX: admin portal previously fetched candidates/votes/submissions
+  // ONCE on mount (`useEffect(() => { fetchAll() }, [])`) with no realtime
+  // subscription — unlike ElectionVoting.tsx and ElectionResults, which both
+  // subscribe to postgres_changes. That meant totalVoters/totalVotesCast
+  // (derived from that one-time snapshot) froze the moment you opened the
+  // Admin tab and never updated again until you left and re-entered the view.
+  // Adding the same realtime subscription pattern here so fetchAll() re-runs
+  // whenever election_votes, election_submissions, or election_candidates change.
+  useEffect(() => {
+    fetchAll()
+    const channel = supabase
+      .channel('admin-election-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'election_votes' }, () => fetchAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'election_submissions' }, () => fetchAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'election_candidates' }, () => fetchAll())
+      .subscribe()
+    realtimeRef.current = channel
+    return () => { supabase.removeChannel(channel) }
+  }, [])
 
   const fetchAll = async () => {
     setLoading(true)
@@ -159,11 +178,6 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
     fetchAll()
   }
 
-  // ── FIX: resetting votes must also clear each candidate's manually-set
-  // `contribution` ("sponsor votes"), since vote counts everywhere in the app
-  // are computed as ballotVotes + contribution (see voteCountFor / fetchLiveCounts).
-  // Without this, the Live Count / Final Result views kept showing old totals
-  // after a reset even though election_votes & election_submissions were cleared.
   const resetVotes = async () => {
     if (!confirm('Reset ALL votes and submissions? This cannot be undone.')) return
     setResettingVotes(true)
@@ -209,19 +223,8 @@ export default function ElectionAdminPortal({ onBack }: { onBack: () => void }) 
   }
   const candidatesForPosition = (position: string) => candidates.filter(c => c.position === position)
 
-  // Sum of all sponsor-added votes across every candidate.
   const totalContributions = candidates.reduce((s, c) => s + (c.contribution ?? 0), 0)
-
-  // ── FIX: this used to just be `votes.length`, which only counts rows in
-  // election_votes and ignores sponsor-added `contribution` amounts. Every
-  // per-candidate count on this page already includes contribution via
-  // voteCountFor(), so the summary total needs to match.
   const totalVotesCast = votes.length + totalContributions
-
-  // ── FIX: "Total Voters" used to be just `submissions.length` (real
-  // ballot submissions). Per admin request, each sponsor-added vote should
-  // also count as a "voter" — so this now adds totalContributions on top of
-  // real submissions.
   const totalVoters = submissions.length + totalContributions
 
   const navItems: { id: AdminView; label: string; icon: any }[] = [
